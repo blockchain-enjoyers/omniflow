@@ -44,9 +44,15 @@ contract KernelPayoutTest is Test {
         if (block.chainid == 42161 || block.chainid == 421614) {
             // Fork of a live Arbitrum network: use the deployed bytecode (verified on Sourcify), not our build.
             entryPoint = IEntryPoint(0x0000000071727De22E5E9d8BAf0edAc6f37da032);
-            factory = KernelFactory(0x2577507b78c2008Ff367261CB6285d44ba5eF2E9); // Kernel 0.3.3
+            // 0.3.1 by default (audited up to v3.1); KERNEL=0.3.3 runs the same suite against 0.3.3.
+            bool v33 = keccak256(bytes(vm.envOr("KERNEL", string("0.3.1")))) == keccak256("0.3.3");
+            factory = KernelFactory(v33 ? 0x2577507b78c2008Ff367261CB6285d44ba5eF2E9 : 0xaac5D4240AF87249B3f71BC8E4A2cae074A3E419);
             weighted = WeightedECDSAValidator(0xeD89244160CfE273800B58b1B534031699dFeEEE);
-            require(address(factory.implementation()) == 0xd6CEDDe84be40893d153Be9d467CD6aD37875b28, "unexpected impl");
+            require(
+                address(factory.implementation())
+                    == (v33 ? 0xd6CEDDe84be40893d153Be9d467CD6aD37875b28 : 0xBAC849bB641841b44E965fB01A4Bf5F074f84b4D),
+                "unexpected impl"
+            );
         } else {
             entryPoint = IEntryPoint(EntryPointLib.deploy());
             Kernel impl = new Kernel(entryPoint);
