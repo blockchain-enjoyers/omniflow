@@ -26,7 +26,8 @@ export type FrozenRow =
       amount: bigint;
       tip: bigint;
       autoRefundAt: number;
-    };
+    }
+  | { kind: "refund"; rowId: string; depositId: Hex; amount: bigint };
 
 /**
  * The payout manifest of one batch: the exact content approvers sign (via callDataAndNonceHash).
