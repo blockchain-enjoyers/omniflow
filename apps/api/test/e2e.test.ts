@@ -244,6 +244,13 @@ describe.skipIf(!DB_URL)("slice e2e", () => {
     expect(receipt.body.payout.status).toBe("closed"); // every row final → closes itself
   });
 
+  it("a scheduler tick is idempotent: nothing changes when there is nothing to do", async () => {
+    const before = (await db.query("SELECT id, status FROM payout_rows ORDER BY id")).rows;
+    await service.tick();
+    await service.tick();
+    expect((await db.query("SELECT id, status FROM payout_rows ORDER BY id")).rows).toEqual(before);
+  });
+
   it("first payout stays open while rows wait; manual close keeps them in the report", async () => {
     let r = await http_.get(`/payouts/${payoutId}/receipt`).set(dev).expect(200);
     expect(r.body.payout.status).toBe("partially_executed");

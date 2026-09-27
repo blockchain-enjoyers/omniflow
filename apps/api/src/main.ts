@@ -19,4 +19,17 @@ const service = new PayoutService(db, chain, new ClaimKeyVault(cfg.claimKeyEncry
 });
 const app = await createApp(service, chain);
 await app.listen(cfg.port);
+
+// Indexer + keeper loop. Deliberately simple (no job queue; one idempotent loop is enough for now).
+const TICK_MS = Number(process.env.TICK_MS ?? 15_000);
+let running = false;
+setInterval(async () => {
+  if (running) return;
+  running = true;
+  try {
+    await service.tick();
+  } finally {
+    running = false;
+  }
+}, TICK_MS);
 console.log(`omniflow api on :${cfg.port}, chain ${cfg.chainId}`);

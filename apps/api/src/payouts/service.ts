@@ -487,6 +487,20 @@ export class PayoutService {
     return { batch: rows[0], org: await this.org(p.org_id) };
   }
 
+  /**
+   * One scheduler pass: settle batches left 'submitted' (e.g. after a restart), index escrow events,
+   * run the auto-refund keeper. Every step is idempotent.
+   */
+  async tick() {
+    const stuck = await this.db.query(`SELECT id FROM batches WHERE status='submitted'`);
+    for (const b of stuck.rows) await this.settleBatch(b.id).catch((e) => console.error("settle", b.id, e));
+    const orgs = await this.db.query(`SELECT id FROM orgs`);
+    for (const o of orgs.rows) {
+      await this.pollEscrow(o.id).catch((e) => console.error("poll", o.id, e));
+      await this.runKeeper(o.id).catch((e) => console.error("keeper", o.id, e));
+    }
+  }
+
   async batchesOf(payoutId: string) {
     return (await this.db.query(`SELECT id, batch_no, kind, status, approve_hash, tx_hash FROM batches WHERE payout_id=$1 ORDER BY batch_no`, [payoutId])).rows;
   }
