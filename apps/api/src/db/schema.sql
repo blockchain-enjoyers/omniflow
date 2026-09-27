@@ -172,3 +172,37 @@ CREATE TABLE IF NOT EXISTS detail_forms (
 );
 ALTER TABLE payout_rows ADD COLUMN IF NOT EXISTS details_source text;   -- 'csv' | 'form' | 'address_book' | 'repeat'
 ALTER TABLE payout_rows ADD COLUMN IF NOT EXISTS category text;
+
+-- address book, filled by hand and from paid rows.
+CREATE TABLE IF NOT EXISTS address_book (
+  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id     uuid NOT NULL REFERENCES orgs(id),
+  name       text NOT NULL,
+  email      text,
+  address    text,
+  chain_id   integer NOT NULL,
+  category   text,
+  last_amount numeric(78,0),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (org_id, name)
+);
+
+-- recurring payouts create a draft from a template payout; approval stays mandatory.
+CREATE TABLE IF NOT EXISTS schedules (
+  id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id       uuid NOT NULL REFERENCES orgs(id),
+  title        text NOT NULL,
+  template_payout_id uuid NOT NULL REFERENCES payouts(id),
+  every        text NOT NULL CHECK (every IN ('week','month')),
+  next_run_at  timestamptz NOT NULL,
+  active       boolean NOT NULL DEFAULT true,
+  created_by   text,
+  created_at   timestamptz NOT NULL DEFAULT now()
+);
+
+ALTER TABLE batches DROP CONSTRAINT IF EXISTS batches_kind_check;
+ALTER TABLE batches ADD CONSTRAINT batches_kind_check CHECK (kind IN ('pay','revoke','rekey'));
+ALTER TABLE payout_rows ADD COLUMN IF NOT EXISTS executed_at timestamptz;   -- block time of the batch
+ALTER TABLE payout_rows ADD COLUMN IF NOT EXISTS claimed_at timestamptz;
+ALTER TABLE payout_rows ADD COLUMN IF NOT EXISTS rekey_pending boolean NOT NULL DEFAULT false;
+ALTER TABLE payouts ADD COLUMN IF NOT EXISTS schedule_id uuid;

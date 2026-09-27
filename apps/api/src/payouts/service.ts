@@ -91,15 +91,21 @@ export class PayoutService {
 
   // --------------------------------------------------------------- payouts
 
-  async createPayout(orgId: string, input: { title: string; csv: string; autoRefundDays?: number | null; source?: string }) {
-    const org = await this.org(orgId);
+  async createPayout(orgId: string, input: { title: string; csv: string; autoRefundDays?: number | null }) {
     const { rows, errors } = parsePayoutCsv(input.csv, this.cfg.tokenDecimals);
     if (errors.length) throw new HttpError(400, JSON.stringify(errors));
+    return this.createPayoutFromRows(orgId, { ...input, rows, source: "csv" });
+  }
+
+  async createPayoutFromRows(orgId: string, input: { title: string; rows: PayoutRow[]; autoRefundDays?: number | null; source: string; scheduleId?: string }) {
+    const org = await this.org(orgId);
+    const rows = input.rows;
     return tx(this.db, async (c) => {
-      const p = await c.query(`INSERT INTO payouts (org_id, title, auto_refund_days) VALUES ($1,$2,$3) RETURNING id`, [
+      const p = await c.query(`INSERT INTO payouts (org_id, title, auto_refund_days, schedule_id) VALUES ($1,$2,$3,$4) RETURNING id`, [
         orgId,
         input.title,
         input.autoRefundDays === undefined ? null : input.autoRefundDays,
+        input.scheduleId ?? null,
       ]);
       const payoutId = p.rows[0].id as string;
       for (const r of rows) {
@@ -108,7 +114,7 @@ export class PayoutService {
         await c.query(
           `INSERT INTO payout_rows (payout_id, row_key, name, email, address, chain_id, amount, status, category, details_source)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-          [payoutId, r.rowId, r.name, r.email ?? null, r.address ?? null, r.chainId, r.amount.toString(), status, r.category ?? null, input.source ?? "csv"],
+          [payoutId, r.rowId, r.name, r.email ?? null, r.address ?? null, r.chainId, r.amount.toString(), status, r.category ?? null, input.source],
         );
       }
       return { id: payoutId, rows: rows.length };
@@ -152,12 +158,15 @@ export class PayoutService {
       [p.org_id],
     );
     if (open.rows.length) throw new HttpError(409, "another batch of this organisation is still open");
-    const ready = (await this.rows(payoutId)).filter((r) => r.status === "ready").slice(0, this.cfg.maxRowsPerBatch);
+    // A row that failed inside an earlier batch is retried by the next one.
+    const ready = (await this.rows(payoutId)).filter((r) => r.status === "ready" || r.status === "failed").slice(0, this.cfg.maxRowsPerBatch);
     if (!ready.length) throw new HttpError(409, "no rows ready to pay");
 
     const nonce = await this.chain.getNonce(org.account);
     const days = p.auto_refund_days ?? org.auto_refund_days;
-    const autoRefundAt = days ? Math.floor(Date.now() / 1000) + days * 86_400 : 0;
+    // Chain time, not the server clock: the escrow rejects autoRefundAt <= block.timestamp.
+    const chainNow = Number((await this.chain.pub.getBlock({ blockTag: "latest" })).timestamp);
+    const autoRefundAt = days ? chainNow + days * 86_400 : 0;
     const keys = new Map<string, Hex>();
     const frozen: FrozenRow[] = ready.map((r) => {
       if (r.address) return { kind: "transfer", rowId: r.row_key, to: getAddress(r.address), amount: BigInt(r.amount) };
@@ -189,13 +198,38 @@ export class PayoutService {
     return this.insertBatch(org, payoutId, batchNo, nonce, frozen, "revoke", [], new Map(), 0);
   }
 
+  /**
+   * a new claim link for unclaimed deposits (email in spam, link leaked). escrow.rekey under the same N-of-M;
+   * the new key is emailed only after the rekey is on chain — until then the old link keeps working.
+   */
+  async freezeRekey(payoutId: string, rowKeys: string[]) {
+    const p = await this.payout(payoutId);
+    const org = await this.org(p.org_id);
+    const rows = (await this.rows(payoutId)).filter((r) => rowKeys.includes(r.row_key) && r.status === "in_escrow" && r.email);
+    if (!rows.length) throw new HttpError(409, "no unclaimed escrow rows with an email to re-issue");
+    const nonce = await this.chain.getNonce(org.account);
+    const keys = rows.map((r) => ({ r, k: generateClaimKey() }));
+    const frozen: FrozenRow[] = keys.map(({ r, k }) => ({ kind: "rekey", rowId: r.row_key, depositId: r.deposit_id as Hex, newClaimSigner: k.address, amount: 0n }));
+    const batchNo = Number((await this.db.query(`SELECT count(*) FROM batches WHERE payout_id = $1`, [payoutId])).rows[0].count);
+    const b = await this.insertBatch(org, payoutId, batchNo, nonce, frozen, "rekey", [], new Map(), 0);
+    for (const { r, k } of keys) {
+      const sealed = this.vault.seal(k.privateKey);
+      await this.db.query(
+        `INSERT INTO claim_keys (row_id, iv, ciphertext, tag) VALUES ($1,$2,$3,$4) ON CONFLICT (row_id) DO UPDATE SET iv=EXCLUDED.iv, ciphertext=EXCLUDED.ciphertext, tag=EXCLUDED.tag`,
+        [r.id, sealed.iv, sealed.ciphertext, sealed.tag],
+      );
+      await this.db.query(`UPDATE payout_rows SET rekey_pending=true WHERE id=$1`, [r.id]);
+    }
+    return b;
+  }
+
   private async insertBatch(
     org: Awaited<ReturnType<PayoutService["org"]>>,
     payoutId: string,
     batchNo: number,
     nonce: bigint,
     frozen: FrozenRow[],
-    kind: "pay" | "revoke",
+    kind: "pay" | "revoke" | "rekey",
     rowsToLock: DbRow[],
     keys: Map<string, Hex>,
     autoRefundAt: number,
@@ -223,7 +257,7 @@ export class PayoutService {
       for (const r of rowsToLock) {
         const fr = frozen.find((f) => f.rowId === r.row_key)!;
         await c.query(
-          `UPDATE payout_rows SET status='in_batch', batch_id=$2, deposit_id=$3, claim_signer=$4, auto_refund_at=$5 WHERE id=$1 AND status='ready'`,
+          `UPDATE payout_rows SET status='in_batch', batch_id=$2, deposit_id=$3, claim_signer=$4, auto_refund_at=$5, fail_reason=NULL WHERE id=$1 AND status IN ('ready','failed')`,
           [r.id, batchId, fr.kind === "escrow" ? fr.depositId : null, fr.kind === "escrow" ? fr.claimSigner : null, fr.kind === "escrow" && autoRefundAt ? new Date(autoRefundAt * 1000) : null],
         );
         const key = keys.get(r.row_key);
@@ -316,23 +350,46 @@ export class PayoutService {
       if (!r.success) {
         await c.query(`UPDATE batches SET status='failed' WHERE id=$1`, [batchId]);
         if (batch.kind === "pay") await c.query(`UPDATE payout_rows SET status='ready', batch_id=NULL WHERE batch_id=$1`, [batchId]);
+        if (batch.kind === "rekey") {
+          for (const fr of m.rows) await c.query(`UPDATE payout_rows SET rekey_pending=false WHERE payout_id=$1 AND row_key=$2`, [m.payoutId, fr.rowId]);
+          await c.query(`DELETE FROM claim_keys k USING payout_rows r WHERE k.row_id=r.id AND r.payout_id=$1 AND r.row_key = ANY($2)`, [m.payoutId, m.rows.map((x) => x.rowId)]);
+        }
         return;
       }
       await c.query(`UPDATE batches SET status='mined' WHERE id=$1`, [batchId]);
       for (const fr of m.rows) {
         if (fr.kind === "refund") continue; // applied from the Refunded event
         const failed = failedRows.has(fr.rowId);
+        if (fr.kind === "rekey") {
+          if (failed) {
+            await c.query(`UPDATE payout_rows SET rekey_pending=false WHERE payout_id=$1 AND row_key=$2`, [m.payoutId, fr.rowId]);
+            await c.query(`DELETE FROM claim_keys k USING payout_rows r WHERE k.row_id=r.id AND r.payout_id=$1 AND r.row_key=$2`, [m.payoutId, fr.rowId]);
+          } else {
+            await c.query(`UPDATE payout_rows SET rekey_pending=false, claim_signer=$3 WHERE payout_id=$1 AND row_key=$2`, [m.payoutId, fr.rowId, fr.newClaimSigner]);
+          }
+          continue;
+        }
+        // a failed escrow row never created a deposit: its claim key must not linger
+        if (failed && fr.kind === "escrow") {
+          await c.query(`DELETE FROM claim_keys k USING payout_rows r WHERE k.row_id=r.id AND r.payout_id=$1 AND r.row_key=$2`, [m.payoutId, fr.rowId]);
+        }
         await c.query(
-          `UPDATE payout_rows SET status=$3, fail_reason=$4, tx_hash=$5 WHERE payout_id=$1 AND row_key=$2`,
-          [m.payoutId, fr.rowId, failed ? "failed" : fr.kind === "transfer" ? "sent" : "in_escrow", failed ? "execution reverted in batch" : null, r.txHash],
+          `UPDATE payout_rows SET status=$3, fail_reason=$4, tx_hash=$5, executed_at=$6 WHERE payout_id=$1 AND row_key=$2`,
+          [m.payoutId, fr.rowId, failed ? "failed" : fr.kind === "transfer" ? "sent" : "in_escrow", failed ? "execution reverted in batch" : null, r.txHash, failed ? null : r.blockTime],
         );
       }
       await this.refreshPayoutStatus(c, m.payoutId);
     });
     await this.applyEscrowEvents(org, r.blockNumber, r.blockNumber);
     await this.sendClaimEmails(m.payoutId);
-    if (r.success) await this.notifyApprovers(batchId, "sent");
+    if (r.success) {
+      await this.notifyApprovers(batchId, "sent");
+      await this.afterSettle?.(m.payoutId);
+    }
   }
+
+  /** Hook for the address book (ListService.rememberPaid). */
+  afterSettle?: (payoutId: string) => Promise<void>;
 
   /** Scans escrow events (claims, refunds, expiries) from the cursor; idempotent per log. */
   async pollEscrow(orgId: string) {
@@ -356,7 +413,11 @@ export class PayoutService {
         const ins = await c.query(`INSERT INTO applied_logs VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`, [org.chain_id, log.transactionHash, log.logIndex]);
         if (!ins.rowCount) return;
         const status: RowStatus = ev.eventName === "Claimed" ? "claimed" : "refunded";
-        const upd = await c.query(`UPDATE payout_rows SET status=$2 WHERE deposit_id=$1 RETURNING payout_id`, [ev.args.id, status]);
+        const at = new Date(Number((await this.chain.pub.getBlock({ blockNumber: log.blockNumber! })).timestamp) * 1000);
+        const upd = await c.query(
+          `UPDATE payout_rows SET status=$2, claimed_at=CASE WHEN $2='claimed' THEN $3::timestamptz ELSE claimed_at END WHERE deposit_id=$1 RETURNING payout_id`,
+          [ev.args.id, status, at],
+        );
         for (const u of upd.rows) await this.refreshPayoutStatus(c, u.payout_id);
       });
     }
@@ -368,18 +429,19 @@ export class PayoutService {
     const org = await this.org(p.org_id);
     const { rows } = await this.db.query(
       `SELECT r.*, k.iv, k.ciphertext, k.tag FROM payout_rows r JOIN claim_keys k ON k.row_id = r.id
-        WHERE r.payout_id=$1 AND r.status IN ('in_escrow','claimed','refunded')`,
+        WHERE r.payout_id=$1 AND r.status IN ('in_escrow','claimed','refunded') AND NOT r.rekey_pending`,
       [payoutId],
     );
     for (const r of rows) {
       const key = this.vault.open(r);
       const link = formatClaimLink(this.cfg.claimBaseUrl, { chainId: org.chain_id, escrow: org.escrow, depositId: r.deposit_id, key });
       await tx(this.db, async (c) => {
-        const ins = await c.query(`INSERT INTO emails (row_id, kind) VALUES ($1,'claim') ON CONFLICT DO NOTHING`, [r.id]);
-        if (ins.rowCount) {
+        // one email per claim key: a re-issued link (rekey) is a new key and a new email
+        const ins = await c.query(`INSERT INTO emails (row_id, kind) VALUES ($1,$2) ON CONFLICT DO NOTHING`, [r.id, `claim:${r.claim_signer}`]);
+        if (ins.rowCount && r.status === "in_escrow") {
           await this.mailer.send({
             to: r.email,
-            subject: `${this.cfg.senderDisplayName(org.name)}: вам отправлен платёж`,
+            subject: `${this.cfg.senderDisplayName(org.name)}: ${r.claim_signer && (await c.query(`SELECT count(*) FROM emails WHERE row_id=$1`, [r.id])).rows[0].count > 1 ? "новая ссылка на ваш платёж" : "вам отправлен платёж"}`,
             text: `Здравствуйте, ${r.name}.\n\n${org.name} отправил(а) вам платёж. Чтобы получить деньги, откройте ссылку:\n${link}\n\nСсылка — единственный ключ к платежу. Не пересылайте её никому.`,
           });
         }

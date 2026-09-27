@@ -1,0 +1,82 @@
+import { formatUnits, type Address } from "viem";
+import type { Db } from "../db/db.js";
+
+/** USD value at the time of the operation. Where the number comes from is always part of the report. */
+export interface PriceSource {
+  usdPrice(token: Address, at: Date): Promise<{ price: number; source: string }>;
+}
+
+/**
+ * Stablecoin at face value. An oracle (e.g. a Chainlink feed) is a separate decision; until then every report line
+ * says "номинал", so an accountant knows the number is not a market quote.
+ */
+export class StablecoinParity implements PriceSource {
+  async usdPrice(): Promise<{ price: number; source: string }> {
+    return { price: 1, source: "номинал стейблкоина (1 USDC = 1 USD), не рыночная котировка" };
+  }
+}
+
+export interface ReportLine {
+  date: string;
+  payout: string;
+  recipient: string;
+  address: string | null;
+  email: string | null;
+  amount: string;
+  token: string;
+  usdValue: string;
+  priceSource: string;
+  category: string | null;
+  status: string;
+  txHash: string | null;
+  claimedAt: string | null;
+}
+
+export class ReportService {
+  constructor(private readonly db: Db, private readonly price: PriceSource, private readonly decimals: number, private readonly tokenSymbol = "USDC") {}
+
+  /** Every row that left the account in the period: direct transfers and escrow deposits (claimed or not). */
+  async payments(orgId: string, from?: Date, to?: Date): Promise<ReportLine[]> {
+    const { rows } = await this.db.query(
+      `SELECT r.*, p.title, o.token FROM payout_rows r JOIN payouts p ON p.id=r.payout_id JOIN orgs o ON o.id=p.org_id
+        WHERE p.org_id=$1 AND r.executed_at IS NOT NULL
+          AND ($2::timestamptz IS NULL OR r.executed_at >= $2) AND ($3::timestamptz IS NULL OR r.executed_at < $3)
+        ORDER BY r.executed_at, p.title, r.row_key`,
+      [orgId, from ?? null, to ?? null],
+    );
+    const out: ReportLine[] = [];
+    for (const r of rows) {
+      const amount = formatUnits(BigInt(r.amount), this.decimals);
+      const { price, source } = await this.price.usdPrice(r.token, r.executed_at);
+      out.push({
+        date: new Date(r.executed_at).toISOString(),
+        payout: r.title,
+        recipient: r.name,
+        address: r.address,
+        email: r.email,
+        amount,
+        token: this.tokenSymbol,
+        usdValue: (Number(amount) * price).toFixed(2),
+        priceSource: source,
+        category: r.category,
+        status: ({ sent: "отправлено", in_escrow: "по ссылке, не получено", claimed: "получено по ссылке", refunded: "возвращено отправителю" } as Record<string, string>)[r.status] ?? r.status,
+        txHash: r.tx_hash,
+        claimedAt: r.claimed_at ? new Date(r.claimed_at).toISOString() : null,
+      });
+    }
+    return out;
+  }
+
+  static toCsv(lines: ReportLine[]): string {
+    const head = ["Дата (UTC)", "Выплата", "Получатель", "Адрес", "Почта", "Сумма", "Токен", "Стоимость USD", "Источник цены", "Категория", "Статус", "Хеш транзакции", "Получено"];
+    const esc = (v: unknown) => {
+      let s = v === null || v === undefined ? "" : String(v);
+      // CSV/formula injection: names come from uploaded files. Quoting alone does not stop spreadsheets from
+      // evaluating "=...", so a leading apostrophe neutralises it.
+      if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+      return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const body = lines.map((l) => [l.date, l.payout, l.recipient, l.address, l.email, l.amount, l.token, l.usdValue, l.priceSource, l.category, l.status, l.txHash, l.claimedAt].map(esc).join(","));
+    return `﻿${[head.join(","), ...body].join("\n")}\n`;
+  }
+}

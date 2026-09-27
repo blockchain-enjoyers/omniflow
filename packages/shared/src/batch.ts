@@ -25,6 +25,13 @@ export function batchExecutions(m: BatchManifest): Execution[] {
         value: 0n,
         callData: encodeFunctionData({ abi: erc20Abi, functionName: "transfer", args: [row.to, row.amount] }),
       });
+    } else if (row.kind === "rekey") {
+      // a new claim link for an unclaimed deposit; the old link stops working.
+      out.push({
+        target: m.escrow,
+        value: 0n,
+        callData: encodeFunctionData({ abi: claimEscrowAbi, functionName: "rekey", args: [row.depositId, row.newClaimSigner] }),
+      });
     } else if (row.kind === "refund") {
       // revoking goes through the same N-of-M; money returns to the account only.
       out.push({
@@ -80,7 +87,7 @@ export function buildBatchCallData(m: BatchManifest): Hex {
 
 /** Total that leaves the account if every row succeeds: amounts + escrow tips. */
 export function batchTotal(m: BatchManifest): bigint {
-  return m.rows.reduce((s, r) => (r.kind === "refund" ? s : s + r.amount + (r.kind === "escrow" ? r.tip : 0n)), 0n);
+  return m.rows.reduce((s, r) => (r.kind === "refund" || r.kind === "rekey" ? s : s + r.amount + (r.kind === "escrow" ? r.tip : 0n)), 0n);
 }
 
 /** Index of the first execution of each row — to map TryExecuteUnsuccessful(index) back to a row. */

@@ -4,6 +4,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createPublicClient, createTestClient, encodeFunctionData, http, parseAbi, type Address, type Hex } from "viem";
 import { mnemonicToAccount, privateKeyToAccount } from "viem/accounts";
+import { mintToken as devMint } from "@omniflow/devchain";
 import { foundry } from "viem/chains";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -76,30 +77,9 @@ async function rpc(url: string, method: string, params: unknown[]) {
   return j.result;
 }
 
-/**
- * Credits test tokens. Local stack: MockUSDC.mint. Fork: Circle's own path on the FORK only —
- * impersonate masterMinter, configure a minter, mint. Nothing touches the live network.
- */
+/** Credits test tokens on anvil (MockUSDC or Circle USDC on a fork) — see @omniflow/devchain. */
 export async function mintToken(stack: LocalStack, to: Address, amount: bigint) {
-  const pub = createPublicClient({ transport: http(stack.rpcUrl) });
-  const mintAbi = parseAbi(["function mint(address to, uint256 amount) returns (bool)", "function masterMinter() view returns (address)", "function configureMinter(address minter, uint256 allowance) returns (bool)"]);
-  const send = async (from: Address, data: Hex) => {
-    const hash = await rpc(stack.rpcUrl, "eth_sendTransaction", [{ from, to: stack.token, data }]);
-    await pub.waitForTransactionReceipt({ hash });
-  };
-  if (!FORK) {
-    const deployer = mnemonicToAccount(ANVIL_MNEMONIC, { addressIndex: 0 }).address;
-    await rpc(stack.rpcUrl, "anvil_impersonateAccount", [deployer]);
-    return send(deployer, encodeFunctionData({ abi: mintAbi, functionName: "mint", args: [to, amount] }));
-  }
-  const master = await pub.readContract({ address: stack.token, abi: mintAbi, functionName: "masterMinter" });
-  const minter = "0x00000000000000000000000000000000000da0da" as Address;
-  for (const a of [master, minter]) {
-    await rpc(stack.rpcUrl, "anvil_setBalance", [a, "0x56BC75E2D63100000"]);
-    await rpc(stack.rpcUrl, "anvil_impersonateAccount", [a]);
-  }
-  await send(master, encodeFunctionData({ abi: mintAbi, functionName: "configureMinter", args: [minter, amount] }));
-  await send(minter, encodeFunctionData({ abi: mintAbi, functionName: "mint", args: [to, amount] }));
+  await devMint(stack.rpcUrl, stack.token, to, amount);
 }
 
 export async function increaseTime(rpcUrl: string, seconds: number) {

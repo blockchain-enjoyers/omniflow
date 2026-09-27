@@ -49,6 +49,7 @@ export interface ChainConfig {
 export interface OpReceipt {
   txHash: Hex;
   blockNumber: bigint;
+  blockTime: Date;
   success: boolean;
   failedExecutions: number[];
   logs: Log[];
@@ -151,7 +152,8 @@ export class ChainClient {
         } catch {}
       }
     }
-    return { txHash, blockNumber: r.blockNumber, success: success && r.status === "success", failedExecutions, logs: r.logs };
+    const block = await this.pub.getBlock({ blockNumber: r.blockNumber });
+    return { txHash, blockNumber: r.blockNumber, blockTime: new Date(Number(block.timestamp) * 1000), success: success && r.status === "success", failedExecutions, logs: r.logs };
   }
 
   /** Escrow events in a block range — the indexer's feed for claims and refunds. */

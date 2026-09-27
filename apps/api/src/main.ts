@@ -8,7 +8,7 @@ function need(name: string): string {
 }
 const addr = (n: string) => getAddress(need(n)) as Address;
 
-const { app, payouts } = await compose({
+const { app, tick } = await compose({
   databaseUrl: need("DATABASE_URL"),
   chain: { chainId: Number(need("CHAIN_ID")), rpcUrl: need("RPC_URL"), entryPoint: addr("ENTRYPOINT"), submitterKey: need("SUBMITTER_PRIVATE_KEY") as Hex },
   deployment: { factory: addr("KERNEL_FACTORY"), validator: addr("WEIGHTED_VALIDATOR"), escrow: addr("ESCROW"), token: addr("TOKEN") },
@@ -25,6 +25,7 @@ const { app, payouts } = await compose({
     : process.env.PAYMASTER_ADDRESS
       ? { local: { address: addr("PAYMASTER_ADDRESS"), signerKey: need("PAYMASTER_SIGNER_KEY") as Hex } }
       : undefined,
+  onramp: process.env.ONRAMP_EMULATOR_URL ? { emulatorUrl: process.env.ONRAMP_EMULATOR_URL } : undefined,
   devEndpoints: process.env.DEV_ENDPOINTS === "1" && process.env.NODE_ENV !== "production",
 });
 const port = Number(process.env.PORT ?? 3001);
@@ -38,7 +39,7 @@ setInterval(async () => {
   if (running) return;
   running = true;
   try {
-    await payouts.tick();
+    await tick();
   } finally {
     running = false;
   }

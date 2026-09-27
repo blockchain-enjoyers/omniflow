@@ -6,6 +6,9 @@ import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { claimEscrowAbi, DepositStatus, kernelInitData, parseClaimLink, signClaim } from "@omniflow/shared";
 import { readDevMailbox } from "@omniflow/devmail";
 import { PrivyEmulator } from "@omniflow/privy-emulator";
+import { onrampEmulator } from "@omniflow/onramp-emulator";
+import express from "express";
+import type { Server } from "node:http";
 import { createDb, type Db } from "../src/db/db.js";
 import { compose } from "../src/compose.js";
 import { PrivyVerifier } from "../src/auth/privy.js";
@@ -34,6 +37,8 @@ describe.skipIf(!DB_URL)("sender side e2e (emulated Privy)", () => {
   let a2: TestUser;
   let a3: TestUser;
   let outsider: TestUser;
+  let onrampServer: Server;
+  let lists: Awaited<ReturnType<typeof compose>>["lists"];
   let orgId: string;
   let account: Address;
   const alice = privateKeyToAccount(generatePrivateKey()).address;
@@ -48,6 +53,12 @@ describe.skipIf(!DB_URL)("sender side e2e (emulated Privy)", () => {
     await db.query("DROP SCHEMA public CASCADE; CREATE SCHEMA public;");
     emu = new PrivyEmulator(db, { appId: "omniflow-test", walletEncryptionKey: randomBytes(32).toString("hex") });
     await emu.init();
+    const onApp = express();
+    onrampServer = await new Promise<Server>((ok) => {
+      const srv = onApp.listen(0, () => ok(srv));
+    });
+    const onUrl = `http://127.0.0.1:${(onrampServer.address() as { port: number }).port}`;
+    onApp.use(onrampEmulator({ publicUrl: onUrl, rpcUrl: stack.rpcUrl, token: stack.token, decimals: 6, feePercent: 1.75 }));
     const c = await compose({
       db,
       chain: { chainId: CHAIN, rpcUrl: stack.rpcUrl, entryPoint: stack.entryPoint, submitterKey: SUBMITTER_KEY },
@@ -57,8 +68,9 @@ describe.skipIf(!DB_URL)("sender side e2e (emulated Privy)", () => {
       urls: { app: "http://app.local/", claim: "http://claim.local/", form: "http://app.local/" },
       devEndpoints: true,
       paymaster: { local: { address: stack.paymaster, signerKey: PAYMASTER_SIGNER_KEY } },
+      onramp: { emulatorUrl: onUrl },
     });
-    ({ app, chain, payouts } = c);
+    ({ app, chain, payouts, lists } = c);
     await app.init();
     api = request(app.getHttpServer());
     const users = await Promise.all(["ops@acme.test", "a1@acme.test", "a2@acme.test", "a3@acme.test", "eve@evil.test"].map((e) => loginAs(emu, db, e)));
@@ -66,6 +78,7 @@ describe.skipIf(!DB_URL)("sender side e2e (emulated Privy)", () => {
   });
 
   afterAll(async () => {
+    onrampServer?.close();
     await app?.close();
     await db?.end();
     stack?.anvil.kill();
@@ -264,6 +277,93 @@ describe.skipIf(!DB_URL)("sender side e2e (emulated Privy)", () => {
     expect((await payouts.runKeeper(orgId, new Date(Date.now() + 2 * 86_400_000))).refunded).toBe(1);
     expect(await balance(account)).toBe(before + 13_050_000n);
     expect((await api.get(`/payouts/${p.body.id}/receipt`).set(ops.headers).expect(200)).body.payout.status).toBe("closed");
+  });
+
+  // ------------------------------------------------------ address book, repeats, schedules
+
+  it("address book remembers paid recipients; a payout can be built from it", async () => {
+    const book = (await api.get(`/orgs/${orgId}/address-book`).set(ops.headers).expect(200)).body;
+    const aliceEntry = book.find((e: { name: string }) => e.name === "Alice");
+    expect(aliceEntry).toMatchObject({ address: alice, category: "grants", lastAmount: "1000000000" });
+    await api.post(`/orgs/${orgId}/address-book`).set(a1.headers).send({ name: "X", chainId: CHAIN }).expect(403);
+    const p = (await api.post(`/orgs/${orgId}/payouts/from-book`).set(ops.headers).send({ title: "October from book", items: [{ id: aliceEntry.id, amount: "1200" }] }).expect(201)).body;
+    const review = (await api.get(`/payouts/${p.id}/review`).set(ops.headers).expect(200)).body;
+    expect(review.summary.changedAmount[0].previous).toBe("1000000000"); // the diff sees the change vs history
+  });
+
+  it("repeat a payout and edit one row before freezing; a frozen row cannot be edited", async () => {
+    const rep = (await api.post(`/payouts/${payoutId}/repeat`).set(ops.headers).send({ title: "October" }).expect(201)).body;
+    await api.patch(`/payouts/${rep.id}/rows/row-2`).set(ops.headers).send({ amount: "1500" }).expect(200);
+    await api.patch(`/payouts/${rep.id}/rows/row-6`).set(ops.headers).send({ remove: true }).expect(200); // Eve (other chain)
+    const receipt = (await api.get(`/payouts/${rep.id}/receipt`).set(ops.headers).expect(200)).body;
+    expect(receipt.rows.find((x: { name: string }) => x.name === "Alice").amount).toBe("1500000000");
+    expect(receipt.rows.map((x: { name: string }) => x.name)).not.toContain("Eve");
+    await api.patch(`/payouts/${payoutId}/rows/row-2`).set(ops.headers).send({ amount: "1" }).expect(409); // already sent
+  });
+
+  it("a recurring schedule creates a draft and tells operators — nothing is sent without approval", async () => {
+    await api.post(`/orgs/${orgId}/schedules`).set(ops.headers).send({ title: "Monthly stipends", templatePayoutId: payoutId, every: "month", firstRunAt: new Date(Date.now() - 1000).toISOString() }).expect(201);
+    const created = await lists.runSchedules();
+    expect(created).toHaveLength(1);
+    expect(await lists.runSchedules()).toHaveLength(0); // next run is a month away
+    const draft = (await api.get(`/payouts/${created[0]}/receipt`).set(ops.headers).expect(200)).body;
+    expect(draft.payout.status).toBe("draft");
+    expect((await inbox(ops.email))[0]!.subject).toMatch(/черновик регулярной выплаты «Monthly stipends»/);
+  });
+
+  it("re-issuing a claim link — after N-of-M the new link works and the old one does not", async () => {
+    const p = await api.post(`/orgs/${orgId}/payouts`).set(ops.headers).send({ title: "spam folder", csv: `name,email,address,chain_id,amount\nWu,wu@example.test,,${CHAIN},5` }).expect(201);
+    await approveAndSubmit((await api.post(`/payouts/${p.body.id}/batches`).set(ops.headers).expect(201)).body.id);
+    const oldLink = parseClaimLink((await inbox("wu@example.test"))[0]!.body.match(/http:\/\/claim\.local\/#\S+/)![0]);
+    const rk = await api.post(`/payouts/${p.body.id}/rekey`).set(ops.headers).send({ rows: ["row-2"] }).expect(201);
+    expect(await inbox("wu@example.test")).toHaveLength(1); // no new email before the rekey is on chain
+    await approveAndSubmit(rk.body.id, a3, a2);
+    const mails = await inbox("wu@example.test");
+    expect(mails[0]!.subject).toMatch(/новая ссылка на ваш платёж/);
+    const newLink = parseClaimLink(mails[0]!.body.match(/http:\/\/claim\.local\/#\S+/)![0]);
+    const newLinkKey = () => newLink.key;
+    const wallet = privateKeyToAccount(generatePrivateKey()).address;
+    // chain time: an earlier test moved the chain two days ahead of the wall clock
+    const deadline = (await chain.pub.getBlock({ blockTag: "latest" })).timestamp + 3600n;
+    // the old key is rejected by the contract because of the key itself, not the deadline
+    const digestOld = await chain.pub.readContract({ address: oldLink.escrow, abi: claimEscrowAbi, functionName: "getDeposit", args: [oldLink.depositId] });
+    expect(digestOld.claimSigner).not.toBe(privateKeyToAccount(oldLink.key).address);
+    expect(digestOld.claimSigner).toBe(privateKeyToAccount(newLinkKey()).address);
+    const send = async (l: typeof oldLink) => api.post("/claims").send({ escrow: l.escrow, depositId: l.depositId, recipient: wallet, deadline: deadline.toString(), signature: await signClaim(l, wallet, deadline) });
+    expect((await send(oldLink)).status).toBe(400);
+    expect((await send(newLink)).status).toBe(201);
+    expect(await balance(wallet)).toBe(5_000_000n);
+  });
+
+  it("the payments report and CSV export — date, recipient, amount, USD with its source, category, hash", async () => {
+    const lines = (await api.get(`/orgs/${orgId}/reports/payments`).set(a2.headers).expect(200)).body;
+    const aliceLine = lines.find((l: { recipient: string }) => l.recipient === "Alice");
+    expect(aliceLine).toMatchObject({ amount: "1000", token: "USDC", usdValue: "1000.00", category: "grants", status: "отправлено" });
+    expect(aliceLine.priceSource).toMatch(/номинал/);
+    expect(aliceLine.txHash).toMatch(/^0x[0-9a-f]{64}$/);
+    expect(lines.find((l: { recipient: string }) => l.recipient === "Carol").status).toBe("получено по ссылке");
+    const csv = await api.get(`/orgs/${orgId}/reports/payments`).query({ format: "csv" }).set(ops.headers).expect(200);
+    expect(csv.headers["content-type"]).toMatch(/text\/csv/);
+    expect(csv.text.split("\n")[0]).toContain("Стоимость USD");
+    await api.get(`/orgs/${orgId}/reports/payments`).set(outsider.headers).expect(403);
+  });
+
+  it("CSV export neutralises formulas in names from uploaded files", async () => {
+    const p = await api.post(`/orgs/${orgId}/payouts`).set(ops.headers).send({ title: "inj", csv: `name,email,address,chain_id,amount\n=HYPERLINK(\"x\"),,${bob},${CHAIN},1` }).expect(201);
+    await approveAndSubmit((await api.post(`/payouts/${p.body.id}/batches`).set(ops.headers).expect(201)).body.id);
+    const csv = (await api.get(`/orgs/${orgId}/reports/payments`).query({ format: "csv" }).set(ops.headers).expect(200)).text;
+    expect(csv).toContain(`"'=HYPERLINK(""x"")"`);
+  });
+
+  it("buying USDC through the on-ramp (emulator) lands on the organisation account", async () => {
+    await api.post(`/orgs/${orgId}/onramp`).set(outsider.headers).send({ fiatAmount: 100 }).expect(403);
+    const s = (await api.post(`/orgs/${orgId}/onramp`).set(a1.headers).send({ fiatAmount: 1000 }).expect(201)).body;
+    expect(s.destination).toBe(account);
+    const before = await balance(account);
+    const base = s.url.split("/widget/")[0];
+    const r = await fetch(`${base}/sessions/${s.id}/pay`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+    expect((await r.json()).status).toBe("completed");
+    expect(await balance(account)).toBe(before + 982_500_000n); // 1000 − 1.75 % placeholder fee
   });
 
   it("admin invites an operator; the invite activates on their first login", async () => {

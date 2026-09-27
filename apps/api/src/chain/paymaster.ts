@@ -23,7 +23,8 @@ export class LocalVerifyingPaymaster implements Sponsor {
   constructor(private readonly chain: ChainClient, private readonly paymaster: Address, private readonly signerKey: Hex, private readonly ttlSec = 3600) {}
 
   async sponsor(op: PackedOp): Promise<PackedOp> {
-    const now = Math.floor(Date.now() / 1000);
+    // Chain time, not the server clock: validUntil is checked against block.timestamp (AA32 otherwise).
+    const now = Number((await this.chain.pub.getBlock({ blockTag: "latest" })).timestamp);
     const validUntil = now + this.ttlSec;
     const validAfter = 0;
     const head = concatHex([this.paymaster, pad(numberToHex(PM_VERIFICATION_GAS), { size: 16 }), pad(numberToHex(PM_POSTOP_GAS), { size: 16 })]);

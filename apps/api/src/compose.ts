@@ -10,6 +10,9 @@ import { PrivyVerifier } from "./auth/privy.js";
 import { Erc7677Paymaster, LocalVerifyingPaymaster } from "./chain/paymaster.js";
 import { createApp } from "./http/app.js";
 import { ensureDevMailbox } from "@omniflow/devmail";
+import { ListService } from "./payouts/lists.js";
+import { ReportService, StablecoinParity } from "./reports/service.js";
+import { EmulatedOnramp, type OnrampProvider } from "./onramp/onramp.js";
 
 /** Everything the API needs. Real setup vs emulation differs only here. */
 export interface ComposeConfig {
@@ -27,6 +30,8 @@ export interface ComposeConfig {
   /** emulated local VerifyingPaymaster, or a hosted ERC-7677 paymaster; none = the account pays gas in ETH */
   paymaster?: { local: { address: Address; signerKey: Hex } } | { erc7677: { url: string; context?: unknown } };
   devEndpoints?: boolean;
+  /** partner not chosen — the emulator, or nothing */
+  onramp?: { emulatorUrl: string } | OnrampProvider;
 }
 
 export async function compose(cfg: ComposeConfig) {
@@ -50,12 +55,21 @@ export async function compose(cfg: ComposeConfig) {
   }, sponsor);
   const orgs = new OrgService(db, chain, mailer, { chainId: cfg.chain.chainId, ...cfg.deployment, appUrl: cfg.urls.app });
   const forms = new FormService(db, mailer, cfg.urls.form);
+  const lists = new ListService(db, payouts, mailer, cfg.urls.app, cfg.tokenDecimals ?? 6);
+  payouts.afterSettle = (payoutId) => lists.rememberPaid(payoutId);
+  const reports = new ReportService(db, new StablecoinParity(), cfg.tokenDecimals ?? 6);
+  const onramp = !cfg.onramp ? null : "emulatorUrl" in cfg.onramp ? new EmulatedOnramp(cfg.onramp.emulatorUrl) : cfg.onramp;
+  /** One scheduler pass: indexer, keeper, stuck batches, recurring payouts. Idempotent. */
+  const tick = async () => {
+    await payouts.tick();
+    await lists.runSchedules();
+  };
   const verifier =
     "verifier" in cfg.privy
       ? cfg.privy.verifier
       : "emulatorUrl" in cfg.privy
         ? await PrivyVerifier.fromEmulator(cfg.privy.emulatorUrl)
         : await PrivyVerifier.fromPem(cfg.privy.verificationKeyPem, cfg.privy.appId);
-  const app = await createApp({ db, payouts, orgs, forms, chain, verifier, devEndpoints: cfg.devEndpoints ?? false });
-  return { app, db, chain, payouts, orgs, forms, mailer };
+  const app = await createApp({ db, payouts, orgs, forms, lists, reports, onramp, chain, verifier, devEndpoints: cfg.devEndpoints ?? false });
+  return { app, db, chain, payouts, orgs, forms, lists, reports, mailer, tick };
 }
