@@ -24,6 +24,7 @@ import { tx, type Db } from "../db/db.js";
 import type { ChainClient } from "../chain/chain.js";
 import { opFromJson, opToJson, type PackedOp } from "../chain/chain.js";
 import type { ClaimKeyVault } from "../claimkeys/vault.js";
+import type { Sponsor } from "../chain/paymaster.js";
 import type { Mailer } from "../mail/mailer.js";
 import { parsePayoutCsv } from "./csv.js";
 
@@ -64,6 +65,7 @@ export class PayoutService {
     private readonly vault: ClaimKeyVault,
     private readonly mailer: Mailer,
     private readonly cfg: ServiceConfig,
+    private readonly sponsor?: Sponsor,
   ) {}
 
   // ------------------------------------------------------------------ orgs
@@ -254,7 +256,10 @@ export class PayoutService {
       return { step: "approve" as const, typedData: approveTypedData(org.validator, org.chain_id, batch.approve_hash), manifest: batch.manifest };
     }
     const m = manifestFromJson(batch.manifest);
-    const op = await this.chain.draftOp(org.account, batch.call_data, BigInt(batch.nonce), batchExecutions(m).length);
+    let op = await this.chain.draftOp(org.account, batch.call_data, BigInt(batch.nonce), batchExecutions(m).length);
+    // Omniflow pays gas when a paymaster is configured; paymasterAndData is part of userOpHash,
+    // so it must be final before the last approver signs.
+    if (this.sponsor) op = await this.sponsor.sponsor(op);
     const userOpHash = await this.chain.getUserOpHash(op);
     await this.db.query(`UPDATE batches SET final_op=$2, user_op_hash=$3 WHERE id=$1`, [batchId, opToJson(op), userOpHash]);
     return { step: "final" as const, userOpHash, manifest: batch.manifest };

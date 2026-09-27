@@ -3,7 +3,7 @@ import { readFileSync, mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createPublicClient, createTestClient, encodeFunctionData, http, parseAbi, type Address, type Hex } from "viem";
-import { mnemonicToAccount } from "viem/accounts";
+import { mnemonicToAccount, privateKeyToAccount } from "viem/accounts";
 import { foundry } from "viem/chains";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -18,6 +18,8 @@ const keyAt = (i: number): Hex => {
 };
 export const DEPLOYER_KEY = keyAt(0);
 export const SUBMITTER_KEY = keyAt(1);
+/** signs sponsorships for the emulated VerifyingPaymaster (test-only anvil key) */
+export const PAYMASTER_SIGNER_KEY = keyAt(2);
 
 export interface LocalStack {
   rpcUrl: string;
@@ -28,6 +30,7 @@ export interface LocalStack {
   escrow: Address;
   account: Address;
   factory: Address;
+  paymaster: Address;
 }
 
 /** STACK=fork → an anvil fork of Arbitrum Sepolia with the deployed Kernel 0.3.1, validator and Circle USDC. */
@@ -52,7 +55,7 @@ export async function startLocalStack(approvers: Address[] = [], threshold = 1):
   execFileSync(
     `${FOUNDRY_BIN}/forge`,
     ["script", FORK ? "script/ForkStack.s.sol" : "script/LocalStack.s.sol", "--rpc-url", rpcUrl, "--private-key", DEPLOYER_KEY, "--broadcast", "--disable-code-size-limit", "--offline", "--non-interactive", "-q"],
-    { cwd: CONTRACTS, env: { ...process.env, ...(approvers.length ? { APPROVERS: approvers.join(","), THRESHOLD: String(threshold) } : {}), OUT: out }, stdio: "pipe" },
+    { cwd: CONTRACTS, env: { ...process.env, ...(approvers.length ? { APPROVERS: approvers.join(","), THRESHOLD: String(threshold) } : {}), PAYMASTER_SIGNER: privateKeyToAccount(PAYMASTER_SIGNER_KEY).address, OUT: out }, stdio: "pipe" },
   );
   const d = JSON.parse(readFileSync(resolve(CONTRACTS, out), "utf8"));
   const stack = { rpcUrl, anvil, ...d } as LocalStack;
@@ -61,8 +64,8 @@ export async function startLocalStack(approvers: Address[] = [], threshold = 1):
 }
 
 /** Gas prefund (until the paymaster pays) and 1 000 000 test USDC for an organisation account. */
-export async function fundAccount(stack: LocalStack, account: Address, usdc = 1_000_000_000_000n) {
-  await rpc(stack.rpcUrl, "anvil_setBalance", [account, "0x8AC7230489E80000"]);
+export async function fundAccount(stack: LocalStack, account: Address, usdc = 1_000_000_000_000n, eth = true) {
+  if (eth) await rpc(stack.rpcUrl, "anvil_setBalance", [account, "0x8AC7230489E80000"]);
   await mintToken(stack, account, usdc);
 }
 

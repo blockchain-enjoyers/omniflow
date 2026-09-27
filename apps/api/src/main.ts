@@ -20,6 +20,11 @@ const { app, payouts } = await compose({
   tokenDecimals: Number(process.env.TOKEN_DECIMALS ?? 6),
   claimTip: BigInt(process.env.CLAIM_TIP_UNITS ?? "50000"),
   maxRowsPerBatch: Number(process.env.MAX_ROWS_PER_BATCH ?? 40),
+  paymaster: process.env.PAYMASTER_URL
+    ? { erc7677: { url: process.env.PAYMASTER_URL } }
+    : process.env.PAYMASTER_ADDRESS
+      ? { local: { address: addr("PAYMASTER_ADDRESS"), signerKey: need("PAYMASTER_SIGNER_KEY") as Hex } }
+      : undefined,
   devEndpoints: process.env.DEV_ENDPOINTS === "1" && process.env.NODE_ENV !== "production",
 });
 const port = Number(process.env.PORT ?? 3001);

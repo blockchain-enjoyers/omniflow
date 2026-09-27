@@ -7,6 +7,8 @@ import {KernelFactory} from "kernel/factory/KernelFactory.sol";
 import {IHook, IValidator} from "kernel/interfaces/IERC7579Modules.sol";
 import {ValidatorLib} from "kernel/utils/ValidationTypeLib.sol";
 import {ClaimEscrow} from "../src/ClaimEscrow.sol";
+import {VerifyingPaymaster} from "account-abstraction/samples/VerifyingPaymaster.sol";
+import {IEntryPoint as IEntryPointAA} from "account-abstraction/interfaces/IEntryPoint.sol";
 
 /// For an anvil FORK of Arbitrum Sepolia: uses the deployed EntryPoint v0.7, Kernel 0.3.1 factory
 /// and WeightedECDSAValidator; deploys only our ClaimEscrow for Circle's testnet USDC.
@@ -38,6 +40,7 @@ contract ForkStack is Script {
         tokens[0] = USDC_SEPOLIA;
         ClaimEscrow escrow = new ClaimEscrow(tokens);
         address account = approvers.length > 0 ? KernelFactory(FACTORY_031).createAccount(initData, bytes32(0)) : address(0);
+        address paymaster = _paymaster(ENTRYPOINT);
         vm.stopBroadcast();
 
         string memory o = "deploy";
@@ -46,7 +49,17 @@ contract ForkStack is Script {
         vm.serializeAddress(o, "validator", WEIGHTED);
         vm.serializeAddress(o, "token", USDC_SEPOLIA);
         vm.serializeAddress(o, "escrow", address(escrow));
+        vm.serializeAddress(o, "paymaster", paymaster);
         vm.writeJson(vm.serializeAddress(o, "account", account), vm.envString("OUT"));
+    }
+
+    /// EMULATION of a hosted verifying paymaster: signer = the API's paymaster key; funded deposit.
+    function _paymaster(address entryPoint) internal returns (address) {
+        address pmSigner = vm.envOr("PAYMASTER_SIGNER", address(0));
+        if (pmSigner == address(0)) return address(0);
+        VerifyingPaymaster pm = new VerifyingPaymaster(IEntryPointAA(entryPoint), pmSigner);
+        pm.deposit{value: 5 ether}();
+        return address(pm);
     }
 
     function _sortDesc(address[] memory a) internal pure returns (address[] memory) {

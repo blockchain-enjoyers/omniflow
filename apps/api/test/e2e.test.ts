@@ -11,7 +11,7 @@ import { compose } from "../src/compose.js";
 import { PrivyVerifier } from "../src/auth/privy.js";
 import type { ChainClient } from "../src/chain/chain.js";
 import type { PayoutService } from "../src/payouts/service.js";
-import { FORK, fundAccount, increaseTime, loginAs, startLocalStack, SUBMITTER_KEY, type LocalStack, type TestUser } from "./helpers.js";
+import { FORK, fundAccount, increaseTime, loginAs, PAYMASTER_SIGNER_KEY, startLocalStack, SUBMITTER_KEY, type LocalStack, type TestUser } from "./helpers.js";
 
 /**
  * The whole sender side, end to end on a local chain (or a Sepolia fork with STACK=fork), with Privy EMULATED:
@@ -56,6 +56,7 @@ describe.skipIf(!DB_URL)("sender side e2e (emulated Privy)", () => {
       claimKeyEncryptionKey: randomBytes(32).toString("hex"),
       urls: { app: "http://app.local/", claim: "http://claim.local/", form: "http://app.local/" },
       devEndpoints: true,
+      paymaster: { local: { address: stack.paymaster, signerKey: PAYMASTER_SIGNER_KEY } },
     });
     ({ app, chain, payouts } = c);
     await app.init();
@@ -139,7 +140,7 @@ describe.skipIf(!DB_URL)("sender side e2e (emulated Privy)", () => {
     expect([...me.body.orgs[0].roles].sort()).toEqual(["admin", "operator"]);
     const members = await api.get(`/orgs/${orgId}/members`).set(a1.headers).expect(200);
     expect(members.body.filter((m: { roles: string[] }) => m.roles.includes("approver"))).toHaveLength(3);
-    await fundAccount(stack, account);
+    await fundAccount(stack, account, 1_000_000_000_000n, false); // USDC only: gas is paid by the paymaster
   });
 
   it("roles are enforced: approvers cannot create payouts, outsiders see nothing", async () => {
@@ -282,6 +283,10 @@ describe.skipIf(!DB_URL)("sender side e2e (emulated Privy)", () => {
   it("dev mailbox is served (DEV_ENDPOINTS on in this test)", async () => {
     const r = await api.get("/dev/mailbox").query({ to: "carol@example.test" }).expect(200);
     expect(r.body.length).toBeGreaterThan(0);
+  });
+
+  it("the organisation never needed ETH — every operation was sponsored by the paymaster", async () => {
+    expect(await chain.pub.getBalance({ address: account })).toBe(0n);
   });
 
   it("manual close keeps unexecuted rows in the report", async () => {
