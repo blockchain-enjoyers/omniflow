@@ -167,37 +167,44 @@ function EmulatorAuth({ url, confirm, children }: { url: string; confirm?: (what
   return <Ctx.Provider value={auth}>{children}</Ctx.Provider>;
 }
 
-/** Login form that works for both modes. */
-export function LoginForm({ title }: { title?: string }) {
+/** Login form that works for both modes. Styled by @omniflow/ui/base.css. */
+export function LoginForm({ title, subtitle }: { title?: string; subtitle?: string }) {
   const auth = useAuth();
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
   const [err, setErr] = useState("");
-  const run = (fn: () => Promise<void>) => async () => {
+  const [busy, setBusy] = useState(false);
+  const run = (fn: () => Promise<void>) => async (e?: { preventDefault(): void }) => {
+    e?.preventDefault();
     setErr("");
+    setBusy(true);
     try {
       await fn();
-    } catch (e) {
-      setErr((e as Error).message);
+    } catch (x) {
+      setErr((x as Error).message);
+    } finally {
+      setBusy(false);
     }
   };
-  if (auth.mode === "privy") return <button onClick={run(() => auth.startLogin())}>Войти (почта или passkey)</button>;
   return (
     <div className="login">
-      {title && <h2>{title}</h2>}
-      {auth.mode === "emulator" && <p className="emu">Вход через эмулятор Privy — код придёт в dev-ящик.</p>}
-      {!auth.needsCode ? (
-        <>
-          <input data-testid="login-email" type="email" placeholder="почта" value={email} onChange={(e) => setEmail(e.target.value.trim())} />
-          <button data-testid="login-start" onClick={run(() => auth.startLogin(email))}>Получить код</button>
-        </>
+      {title && <h2 style={{ marginBottom: 4 }}>{title}</h2>}
+      {subtitle && <p className="hint">{subtitle}</p>}
+      {auth.mode === "privy" ? (
+        <div className="actions"><button className="block" onClick={run(() => auth.startLogin())}>Войти по почте или passkey</button></div>
+      ) : !auth.needsCode ? (
+        <form onSubmit={run(() => auth.startLogin(email))} style={{ marginTop: 12 }}>
+          <label className="field"><span>Почта</span><input data-testid="login-email" type="email" autoComplete="email" placeholder="you@company.com" value={email} onChange={(e) => setEmail(e.target.value.trim())} /></label>
+          <div className="actions"><button className="block" type="submit" data-testid="login-start" disabled={busy || !email}>Получить код</button></div>
+        </form>
       ) : (
-        <>
-          <input data-testid="login-code" placeholder="код из письма" value={code} onChange={(e) => setCode(e.target.value.trim())} />
-          <button data-testid="login-verify" onClick={run(() => auth.verifyCode(code))}>Войти</button>
-        </>
+        <form onSubmit={run(() => auth.verifyCode(code))} style={{ marginTop: 12 }}>
+          <label className="field"><span>Код из письма</span><input data-testid="login-code" inputMode="numeric" autoComplete="one-time-code" placeholder="6 цифр" value={code} onChange={(e) => setCode(e.target.value.trim())} /></label>
+          <div className="actions"><button className="block" type="submit" data-testid="login-verify" disabled={busy || !code}>Войти</button></div>
+        </form>
       )}
-      {err && <p className="warn">{err}</p>}
+      {auth.mode === "emulator" && <div className="callout emu" style={{ marginTop: 16, marginBottom: 0 }}>Вход через эмулятор Privy — код придёт в dev-ящик.</div>}
+      {err && <p className="error">{err}</p>}
     </div>
   );
 }

@@ -12,6 +12,7 @@
   "dependencies": {
     "@omniflow/auth-client": "0.1.0",
     "@omniflow/shared": "0.1.0",
+    "@omniflow/ui": "0.1.0",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "viem": "2.56.9"

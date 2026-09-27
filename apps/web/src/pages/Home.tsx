@@ -1,39 +1,65 @@
 import { useAuth } from "@omniflow/auth-client";
 import { call, type Me } from "../api";
-import { Err, Section, status, short, useLoad } from "../ui";
+import { Addr, Badge, chainName, Err, Section, useLoad } from "../ui";
 
 const ROLE: Record<string, string> = { admin: "администратор", operator: "оператор", approver: "подтверждающий" };
 
 export function Home() {
   const auth = useAuth();
-  const me = useLoad(() => call<Me>(auth.headers, "GET", "/me"), [auth.user?.did]);
+  const me = useLoadMe(auth.headers, auth.user?.did);
   return (
     <>
-      <Section title="Мои организации" testid="orgs">
-        {me.data?.orgs.length === 0 && <p>Пока нет ни одной.</p>}
-        <ul>
-          {me.data?.orgs.map((o) => (
-            <li key={o.id}>
-              <a href={`#/org/${o.id}`} data-testid={`org-${o.name}`}>{o.name}</a> — аккаунт {short(o.account)} · {o.roles.map((r) => ROLE[r] ?? r).join(", ")}
-            </li>
-          ))}
-        </ul>
-        <a className="button" href="#/setup/new" data-testid="new-org">Создать организацию</a>
-      </Section>
+      <div className="page-head">
+        <div>
+          <h1>Организации</h1>
+          <div className="sub">Аккаунты, с которых вы платите или подтверждаете выплаты.</div>
+        </div>
+        <a className="btn" href="#/setup/new" data-testid="new-org">+ Создать организацию</a>
+      </div>
+
       {!!me.data?.setups.length && (
-        <Section title="Ждут вашего участия" testid="setups">
-          <ul>
+        <Section title="Ждут вашего участия" desc="Аккаунт появится, когда все подтверждающие войдут и подпишут состав." testid="setups">
+          <ul className="check-list">
             {me.data.setups.map((s) => (
               <li key={s.id}>
-                <a href={`#/setup/${s.id}`} data-testid={`setup-${s.name}`}>{s.name}</a> — {status(s.status)}
-                {s.joined === false && " · вы ещё не присоединились"}
-                {s.joined && s.confirmed === false && " · ждёт вашего подтверждения состава"}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <a href={`#/setup/${s.id}`} data-testid={`setup-${s.name}`} className="cell-main">{s.name}</a>
+                  <span className="cell-sub hint">
+                    {s.joined === false ? "Вы ещё не присоединились" : s.joined && s.confirmed === false ? "Ждёт вашей подписи состава" : "Ждём остальных"}
+                  </span>
+                </div>
+                <Badge s={s.status} />
               </li>
             ))}
           </ul>
         </Section>
       )}
+
+      {me.data && me.data.orgs.length === 0 && (
+        <section className="card empty" data-testid="orgs">
+          <h2 style={{ marginBottom: 8 }}>Пока нет ни одной организации</h2>
+          <p className="hint">Создайте аккаунт организации: назначьте подтверждающих, и только они смогут отправлять с него деньги.</p>
+        </section>
+      )}
+      {!!me.data?.orgs.length && (
+        <div className="org-list" data-testid="orgs">
+          {me.data.orgs.map((o) => (
+            <a key={o.id} className="card org-card" href={`#/org/${o.id}`} data-testid={`org-${o.name}`}>
+              <div className="name">{o.name}</div>
+              <div className="hint small" style={{ marginBottom: 10 }}>{chainName(o.chain_id)}</div>
+              <div className="row" style={{ justifyContent: "space-between" }}>
+                <Addr value={o.account} />
+                <span className="row">{o.roles.map((r) => <span key={r} className="chip">{ROLE[r] ?? r}</span>)}</span>
+              </div>
+            </a>
+          ))}
+        </div>
+      )}
       <Err e={me.error} />
     </>
   );
+}
+
+function useLoadMe(headers: () => Promise<Record<string, string>>, did?: string) {
+  return useLoad(() => call<Me>(headers, "GET", "/me"), [did]);
 }

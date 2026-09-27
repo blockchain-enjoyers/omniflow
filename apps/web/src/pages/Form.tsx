@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { isAddress } from "viem";
 import { call } from "../api";
-import { Err, Section, usdc, useAction, useLoad } from "../ui";
+import { Callout, chainName, Err, Field, Section, usdc, useAction, useLoad } from "../ui";
 
 /** the recipient fills in where to be paid. Public — the link is the capability. Not a payment link. */
 export function FormPage({ token }: { token: string }) {
@@ -12,27 +12,36 @@ export function FormPage({ token }: { token: string }) {
   const a = useAction();
   const v = view.data;
   return (
-    <Section title="Куда вам платить" testid="form">
-      {v && (
-        <>
-          <p><b>{v.org}</b> собирается отправить вам, {v.name}, <b>{usdc(v.amount)}</b>.</p>
-          <p className="hint">Это не платёж и не ссылка на получение денег. Никто не попросит у вас сид-фразу или подпись.</p>
-          {v.locked ? (
-            <p data-testid="form-locked">Платёж уже в обработке — реквизиты изменить нельзя.</p>
-          ) : done ? (
-            <p data-testid="form-done">Спасибо. Отправитель увидит реквизиты и отправит платёж после проверки.</p>
-          ) : (
-            <>
-              <label>Адрес кошелька в сети {v.chainId} <input data-testid="form-address" value={address} onChange={(e) => setAddress(e.target.value.trim())} placeholder="0x…" /></label>
-              <p className="hint">Если адреса нет — оставьте почту, придёт ссылка на получение.</p>
-              <label>Почта <input data-testid="form-email" value={email} onChange={(e) => setEmail(e.target.value.trim())} /></label>
-              {address && !isAddress(address) && <p className="warn">Адрес выглядит неверно.</p>}
-              <button data-testid="form-submit" disabled={a.busy || (!address && !email)} onClick={a.run(async () => { await call(null, "POST", `/forms/${token}`, { address: address || undefined, email: email || undefined }); setDone(true); })}>Отправить</button>
-            </>
-          )}
-        </>
-      )}
-      <Err e={view.error || a.error} />
-    </Section>
+    <>
+      <div className="page-head"><div><h1>Куда вам платить</h1>{v && <div className="sub">{v.org} собирается отправить вам платёж</div>}</div></div>
+      <Section testid="form">
+        {v && (
+          <>
+            <p className="hint" style={{ marginBottom: 2 }}>{v.name}, вам причитается</p>
+            <div className="approve-total">{usdc(v.amount)}</div>
+            <Callout>Это не платёж и не ссылка на получение денег. Никто не попросит у вас сид-фразу или подпись.</Callout>
+            {v.locked ? (
+              <Callout tone="info" testid="form-locked">Платёж уже в обработке — реквизиты изменить нельзя.</Callout>
+            ) : done ? (
+              <Callout tone="ok" testid="form-done">Спасибо. Отправитель увидит реквизиты и отправит платёж после проверки.</Callout>
+            ) : (
+              <>
+                <Field label={`Адрес кошелька, сеть ${chainName(v.chainId)}`}>
+                  <input className="mono" data-testid="form-address" value={address} onChange={(e) => setAddress(e.target.value.trim())} placeholder="0x…" />
+                </Field>
+                {address && !isAddress(address) && <p className="error" style={{ marginTop: -8 }}>Адрес выглядит неверно.</p>}
+                <Field label="Или почта" help="Если кошелька нет — придёт ссылка на получение.">
+                  <input type="email" data-testid="form-email" value={email} onChange={(e) => setEmail(e.target.value.trim())} />
+                </Field>
+                <div className="actions">
+                  <button className="block" data-testid="form-submit" disabled={a.busy || (!address && !email)} onClick={a.run(async () => { await call(null, "POST", `/forms/${token}`, { address: address || undefined, email: email || undefined }); setDone(true); })}>Отправить</button>
+                </div>
+              </>
+            )}
+          </>
+        )}
+        <Err e={view.error || a.error} />
+      </Section>
+    </>
   );
 }

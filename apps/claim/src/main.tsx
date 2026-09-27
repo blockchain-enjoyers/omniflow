@@ -2,6 +2,7 @@ import { createRoot } from "react-dom/client";
 import { AuthProvider } from "@omniflow/auth-client";
 import { App } from "./App";
 import { PRIVY_APP_ID, PRIVY_EMULATOR_URL } from "./config";
+import "@omniflow/ui/base.css";
 import "./style.css";
 
 const withLogin = Boolean(PRIVY_APP_ID || PRIVY_EMULATOR_URL);
