@@ -1,0 +1,13 @@
+:root { font-family: system-ui, sans-serif; color: #1a1a1a; background: #fafafa; }
+main { max-width: 560px; margin: 40px auto; padding: 0 16px; }
+.amount { font-size: 2rem; font-weight: 600; margin: 8px 0 24px; }
+section { background: #fff; border: 1px solid #e3e3e3; border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+input { width: 100%; box-sizing: border-box; padding: 8px; margin: 8px 0; font-family: monospace; }
+button { padding: 10px 16px; border-radius: 8px; border: 0; background: #1f5eff; color: #fff; cursor: pointer; }
+button:disabled { background: #9db3f0; cursor: default; }
+.warn { color: #a33; }
+details { color: #666; font-size: 0.9rem; word-break: break-all; }
+@media (prefers-color-scheme: dark) {
+  :root { color: #eee; background: #111; }
+  section { background: #1b1b1b; border-color: #333; }
+}
