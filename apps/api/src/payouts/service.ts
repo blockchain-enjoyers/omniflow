@@ -477,7 +477,7 @@ export class PayoutService {
     const p = await this.payout(payoutId);
     const rows = await this.rows(payoutId);
     return {
-      payout: { id: p.id, title: p.title, status: p.status, closedAt: p.closed_at },
+      payout: { id: p.id, title: p.title, status: p.status, closedAt: p.closed_at, orgId: p.org_id, chainId: (await this.org(p.org_id)).chain_id },
       rows: rows.map((r) => ({
         row: r.row_key,
         name: r.name,

@@ -10,6 +10,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@omniflow/auth-client": "0.1.0",
     "@omniflow/shared": "0.1.0",
     "@privy-io/react-auth": "3.45.0",
     "react": "19.3.0",

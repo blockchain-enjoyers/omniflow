@@ -19,3 +19,28 @@ nav button { margin-right: 8px; background: #555; }
 nav button.active { background: #1f5eff; }
 .mono { font-family: monospace; word-break: break-all; }
 .group { margin: 6px 0; }
+header { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
+header .me { margin-left: auto; font-size: 0.9rem; color: #666; }
+a.button { display: inline-block; padding: 10px 16px; border-radius: 8px; background: #1f5eff; color: #fff; text-decoration: none; }
+button.secondary { background: #6b7280; }
+button.danger { background: #b42318; }
+button { margin: 2px; }
+.row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.row input { width: auto; flex: 1; min-width: 120px; }
+.tab { margin-right: 10px; padding: 6px 8px; text-decoration: none; color: inherit; border-bottom: 2px solid transparent; }
+.tab.active { border-color: #1f5eff; }
+nav { margin: 8px 0 16px; overflow-x: auto; white-space: nowrap; }
+.hint { color: #666; font-size: 0.9rem; }
+.warn-soft { background: #fff6e5; border-left: 3px solid #f5a623; padding: 8px; }
+.emu { background: #ffeede; border: 1px dashed #c60; padding: 6px; font-size: 0.85rem; }
+.small { font-size: 0.8rem; }
+.big { font-size: 1.1rem; }
+tr.mine { background: #eef4ff; }
+.modal { position: fixed; inset: 0; background: rgba(0,0,0,.4); display: flex; align-items: center; justify-content: center; }
+.modal > div { background: #fff; padding: 20px; border-radius: 10px; max-width: 480px; margin: 16px; }
+.mail { border-bottom: 1px solid #ddd; padding: 8px 0; }
+.mail pre { white-space: pre-wrap; font-family: inherit; }
+table { display: block; overflow-x: auto; }
+@media (prefers-color-scheme: dark) {
+  .warn-soft { background: #3a2c10; } .emu { background: #3a2512; } tr.mine { background: #1c2a44; } .modal > div { background: #1b1b1b; }
+}

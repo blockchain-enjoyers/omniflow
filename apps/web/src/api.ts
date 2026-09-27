@@ -1,20 +1,57 @@
 import type { Hex } from "viem";
 
 const API = (import.meta.env.VITE_API_URL ?? "http://localhost:3001").replace(/\/$/, "");
-// SLICE ONLY: operator auth is a dev header until Privy token verification is wired (apps/api/src/http/auth.ts).
-const DEV_USER = { "x-dev-user": "operator" };
 
-async function call<T>(method: string, path: string, body?: unknown, auth = true): Promise<T> {
+export type Headers = () => Promise<Record<string, string>>;
+
+export async function call<T>(headers: Headers | null, method: string, path: string, body?: unknown): Promise<T> {
   const r = await fetch(`${API}${path}`, {
     method,
-    headers: { "content-type": "application/json", ...(auth ? DEV_USER : {}) },
+    headers: { "content-type": "application/json", ...(headers ? await headers() : {}) },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(j.error ?? `${r.status}`);
+  const text = await r.text();
+  let j: unknown = text;
+  try {
+    j = JSON.parse(text);
+  } catch {
+    /* CSV and other text bodies */
+  }
+  if (!r.ok) throw new Error((j as { error?: string })?.error ?? `${r.status}`);
   return j as T;
 }
 
+export const apiUrl = API;
+
+export interface Me {
+  user: { did: string; email: string | null; wallet: string | null };
+  orgs: { id: string; name: string; account: string; chain_id: number; roles: string[] }[];
+  setups: { id: string; name: string; status: string; joined: boolean | null; confirmed: boolean | null }[];
+}
+export interface Setup {
+  id: string;
+  name: string;
+  chainId: number;
+  status: string;
+  threshold: number;
+  account: string | null;
+  orgId: string | null;
+  approvers: { email: string; weight: number; wallet: string | null; confirmed: boolean }[];
+  typedData: unknown;
+}
+export interface Org {
+  id: string;
+  name: string;
+  chain_id: number;
+  account: string;
+  token: string;
+  escrow: string;
+  threshold: number;
+  auto_refund_days: number | null;
+  approvers: { address: string; weight: number }[];
+  myRoles: string[];
+}
+export interface PayoutListItem { id: string; title: string; status: string; created_at: string; rows: number; total: string }
 export interface ReviewRow { rowId: string; name: string; email?: string; address?: string; amount: string }
 export interface Review {
   autoRefundDays: number | null;
@@ -25,25 +62,12 @@ export interface Review {
     outliers: { row: ReviewRow; previous: string }[]; notSent: { row: ReviewRow; reason: string }[];
   };
 }
-export interface Receipt {
-  payout: { id: string; title: string; status: string };
-  rows: { row: string; name: string; email: string | null; address: string | null; amount: string; status: string; executed: boolean; txHash: string | null }[];
-}
+export interface ReceiptRow { row: string; name: string; email: string | null; address: string | null; amount: string; status: string; executed: boolean; failReason: string | null; txHash: string | null; depositId: string | null }
+export interface Receipt { payout: { id: string; title: string; status: string; closedAt: string | null; orgId: string; chainId: number }; rows: ReceiptRow[] }
+export interface Batch { id: string; batch_no: number; kind: string; status: string; approve_hash: string; tx_hash: string | null }
 export type NextStep =
   | { step: "approve"; typedData: unknown; manifest: Manifest }
   | { step: "final"; userOpHash: Hex; manifest: Manifest }
   | { step: "done" }
   | { step: "closed"; status: string };
-export interface Manifest { payoutId: string; batchNo: number; rows: { kind: string; rowId: string; to?: string; amount: { $big: string } }[] }
-
-export const api = {
-  createPayout: (orgId: string, b: { title: string; csv: string; autoRefundDays?: number | null }) => call<{ id: string }>("POST", `/orgs/${orgId}/payouts`, b),
-  review: (id: string) => call<Review>("GET", `/payouts/${id}/review`),
-  freeze: (id: string) => call<{ id: string; approveHash: Hex }>("POST", `/payouts/${id}/batches`),
-  batches: (id: string) => call<{ id: string; batch_no: number; kind: string; status: string; tx_hash: string | null }[]>("GET", `/payouts/${id}/batches`),
-  receipt: (id: string) => call<Receipt>("GET", `/payouts/${id}/receipt`),
-  close: (id: string) => call("POST", `/payouts/${id}/close`),
-  nextStep: (batchId: string, approver: string) => call<NextStep>("GET", `/batches/${batchId}/next-step?approver=${approver}`, undefined, false),
-  approve: (batchId: string, signature: Hex) => call("POST", `/batches/${batchId}/approvals`, { signature }, false),
-  final: (batchId: string, signature: Hex) => call<{ txHash: Hex }>("POST", `/batches/${batchId}/final`, { signature }, false),
-};
+export interface Manifest { payoutId: string; batchNo: number; account: string; rows: { kind: string; rowId: string; to?: string; amount: { $big: string } }[] }
