@@ -13,13 +13,14 @@ import { ensureDevMailbox } from "@omniflow/devmail";
 import { ListService } from "./payouts/lists.js";
 import { ReportService, StablecoinParity } from "./reports/service.js";
 import { EmulatedOnramp, type OnrampProvider } from "./onramp/onramp.js";
+import { Monitor, type MonitorConfig } from "./ops/monitor.js";
 
 /** Everything the API needs. Real setup vs emulation differs only here. */
 export interface ComposeConfig {
   databaseUrl?: string;
   db?: Db;
   /** bundlerUrl: hosted bundler (ZeroDev's project RPC); omitted = the API calls handleOps itself */
-  chain: { chainId: number; rpcUrl: string; entryPoint: Address; submitterKey: Hex; bundlerUrl?: string };
+  chain: { chainId: number; rpcUrl: string; entryPoint: Address; submitterKey: Hex; bundlerUrl?: string; logChunkBlocks?: number };
   deployment: { factory: Address; validator: Address; escrow: Address; token: Address };
   privy: { emulatorUrl: string } | { verificationKeyPem: string; appId: string } | { verifier: PrivyVerifier };
   claimKeyEncryptionKey: string;
@@ -34,6 +35,10 @@ export interface ComposeConfig {
    */
   paymaster?: { zerodev: { url: string } } | { local: { address: Address; signerKey: Hex } } | { erc7677: { url: string; context?: unknown } };
   devEndpoints?: boolean;
+  /** extra browser origins; the origins of urls.app/claim/form are always allowed. "any" — tests and local tools only */
+  corsOrigins?: string[] | "any";
+  trustProxy?: boolean | number | string;
+  monitor?: MonitorConfig;
   /** partner not chosen — the emulator, or nothing */
   onramp?: { emulatorUrl: string } | OnrampProvider;
 }
@@ -65,10 +70,12 @@ export async function compose(cfg: ComposeConfig) {
   payouts.afterSettle = (payoutId) => lists.rememberPaid(payoutId);
   const reports = new ReportService(db, new StablecoinParity(), cfg.tokenDecimals ?? 6);
   const onramp = !cfg.onramp ? null : "emulatorUrl" in cfg.onramp ? new EmulatedOnramp(cfg.onramp.emulatorUrl) : cfg.onramp;
-  /** One scheduler pass: indexer, keeper, stuck batches, recurring payouts. Idempotent. */
+  const monitor = new Monitor(db, chain, cfg.monitor);
+  /** One scheduler pass: indexer, keeper, stuck batches, recurring payouts, then the health alerts. Idempotent. */
   const tick = async () => {
     await payouts.tick();
     await lists.runSchedules();
+    await monitor.run();
   };
   const verifier =
     "verifier" in cfg.privy
@@ -76,6 +83,10 @@ export async function compose(cfg: ComposeConfig) {
       : "emulatorUrl" in cfg.privy
         ? await PrivyVerifier.fromEmulator(cfg.privy.emulatorUrl)
         : await PrivyVerifier.fromPem(cfg.privy.verificationKeyPem, cfg.privy.appId);
-  const app = await createApp({ db, payouts, orgs, forms, lists, reports, onramp, chain, verifier, devEndpoints: cfg.devEndpoints ?? false });
-  return { app, db, chain, payouts, orgs, forms, lists, reports, mailer, tick };
+  const app = await createApp({ db, payouts, orgs, forms, lists, reports, onramp, chain, verifier, devEndpoints: cfg.devEndpoints ?? false,
+    corsOrigins: cfg.corsOrigins === "any" ? "any" : [...new Set([cfg.urls.app, cfg.urls.claim, cfg.urls.form, ...(cfg.corsOrigins ?? [])].map((u) => new URL(u).origin))],
+    trustProxy: cfg.trustProxy,
+    monitor,
+  });
+  return { app, db, chain, payouts, orgs, forms, lists, reports, mailer, tick, monitor };
 }

@@ -11,6 +11,7 @@ import {
   Post,
   Query,
   Req,
+  Res,
   UseFilters,
   UseGuards,
   type ArgumentsHost,
@@ -26,6 +27,7 @@ import type { OrgService } from "../orgs/service.js";
 import type { AuthUser } from "../auth/privy.js";
 import { AuthGuard } from "../auth/guard.js";
 import { RateLimit } from "./ratelimit.js";
+import type { Monitor } from "../ops/monitor.js";
 
 export const PAYOUTS = Symbol("PayoutService");
 export const ORGS = Symbol("OrgService");
@@ -291,5 +293,21 @@ export class DevController {
   async mailbox(@Query("to") to?: string) {
     if (!this.extra.devEndpoints) throw new HttpError(404, "not found");
     return readDevMailbox(this.db, to);
+  }
+}
+
+export const MONITOR = Symbol("Monitor");
+
+/** For load balancers and uptime checks: 200 when the API can work, 503 otherwise. No secrets in the body. */
+@Controller("health")
+@UseFilters(ErrorFilter)
+export class HealthController {
+  constructor(@Inject(MONITOR) private readonly monitor: Monitor) {}
+
+  @Get()
+  async health(@Res({ passthrough: true }) res: { status(n: number): unknown }) {
+    const h = await this.monitor.status();
+    if (!h.ok) res.status(503);
+    return h;
   }
 }

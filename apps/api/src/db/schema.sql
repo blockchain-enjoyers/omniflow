@@ -206,3 +206,4 @@ ALTER TABLE payout_rows ADD COLUMN IF NOT EXISTS executed_at timestamptz;   -- b
 ALTER TABLE payout_rows ADD COLUMN IF NOT EXISTS claimed_at timestamptz;
 ALTER TABLE payout_rows ADD COLUMN IF NOT EXISTS rekey_pending boolean NOT NULL DEFAULT false;
 ALTER TABLE payouts ADD COLUMN IF NOT EXISTS schedule_id uuid;
+ALTER TABLE batches ADD COLUMN IF NOT EXISTS submitted_at timestamptz;   -- for the stuck-batch alert

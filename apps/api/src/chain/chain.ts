@@ -49,6 +49,11 @@ export interface ChainConfig {
    * Hosted bundler (ZeroDev). Without it the API bundles itself: the submitter calls EntryPoint.handleOps.
    */
   bundlerUrl?: string;
+  /**
+   * Largest block range per eth_getLogs. Public RPCs cap the range (and the result size); a gap after downtime on
+   * Arbitrum is hundreds of thousands of blocks. Default 2000.
+   */
+  logChunkBlocks?: number;
 }
 
 export interface OpReceipt {
@@ -67,6 +72,8 @@ export interface OpReceipt {
  * The floor is what the end-to-end tests execute with, locally and on the fork.
  */
 export const minCallGas = (executions: number) => 100_000n + 120_000n * BigInt(executions);
+
+const decodeEscrow = (log: Log) => decodeEventLog({ abi: claimEscrowAbi, data: log.data, topics: log.topics });
 
 /** Where to find a submitted op: the bundle transaction (self-bundling) or only the userOpHash (hosted bundler). */
 export interface SubmittedOp {
@@ -188,11 +195,30 @@ export class ChainClient {
   }
 
   /** Escrow events in a block range — the indexer's feed for claims and refunds. */
-  async escrowEvents(escrow: Address, fromBlock: bigint, toBlock: bigint) {
-    const logs = await this.pub.getLogs({ address: escrow, fromBlock, toBlock });
+  /** Block ranges of at most logChunkBlocks covering [from, to], in order. */
+  chunks(from: bigint, to: bigint): [bigint, bigint][] {
+    const span = BigInt(this.cfg.logChunkBlocks ?? 2000);
+    const out: [bigint, bigint][] = [];
+    for (let a = from; a <= to; a += span) out.push([a, a + span - 1n < to ? a + span - 1n : to]);
+    return out;
+  }
+
+  /**
+   * Escrow events in one range. If the RPC refuses the range (too many blocks or results), it is split in half and
+   * retried — down to a single block, which then fails for real.
+   */
+  async escrowEvents(escrow: Address, fromBlock: bigint, toBlock: bigint): Promise<{ log: Log; ev: ReturnType<typeof decodeEscrow> }[]> {
+    let logs: Log[];
+    try {
+      logs = await this.pub.getLogs({ address: escrow, fromBlock, toBlock });
+    } catch (e) {
+      if (toBlock <= fromBlock) throw e;
+      const mid = fromBlock + (toBlock - fromBlock) / 2n;
+      return [...(await this.escrowEvents(escrow, fromBlock, mid)), ...(await this.escrowEvents(escrow, mid + 1n, toBlock))];
+    }
     return logs.flatMap((log) => {
       try {
-        return [{ log, ev: decodeEventLog({ abi: claimEscrowAbi, data: log.data, topics: log.topics }) }];
+        return [{ log, ev: decodeEscrow(log) }];
       } catch {
         return [];
       }

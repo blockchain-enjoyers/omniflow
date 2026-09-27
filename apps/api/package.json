@@ -12,16 +12,17 @@
     "@nestjs/common": "12.1.0",
     "@nestjs/core": "12.1.0",
     "@nestjs/platform-express": "12.1.0",
-    "@omniflow/devchain": "0.1.0",
     "@omniflow/devmail": "0.1.0",
     "@omniflow/shared": "0.1.0",
     "jose": "6.2.12",
     "pg": "8.23.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
+    "tsx": "^4.19.0",
     "viem": "2.56.9"
   },
   "devDependencies": {
+    "@omniflow/devchain": "0.1.0",
     "@omniflow/onramp-emulator": "0.1.0",
     "@omniflow/privy-emulator": "0.1.0",
     "@omniflow/zerodev-emulator": "0.1.0",
@@ -30,7 +31,6 @@
     "@types/supertest": "^6.0.2",
     "express": "5.2.1",
     "supertest": "^7.0.0",
-    "tsx": "^4.19.0",
     "typescript": "^5.6.0",
     "vitest": "^3.2.0"
   }

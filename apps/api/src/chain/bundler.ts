@@ -87,6 +87,11 @@ export interface UserOpReceipt {
 export class BundlerClient {
   constructor(readonly url: string, private readonly entryPoint: Address) {}
 
+  /** reachability: the standard method every ERC-4337 bundler serves */
+  supported(): Promise<Address[]> {
+    return jsonRpc(this.url, "eth_supportedEntryPoints", []);
+  }
+
   send(op: PackedOp): Promise<Hex> {
     return jsonRpc(this.url, "eth_sendUserOperation", [toRpcUserOp(op), this.entryPoint]);
   }

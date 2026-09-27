@@ -11,6 +11,7 @@ import express from "express";
 import type { Server } from "node:http";
 import { createDb, type Db } from "../src/db/db.js";
 import { compose } from "../src/compose.js";
+import { Monitor } from "../src/ops/monitor.js";
 import { PrivyVerifier } from "../src/auth/privy.js";
 import type { ChainClient } from "../src/chain/chain.js";
 import type { PayoutService } from "../src/payouts/service.js";
@@ -64,7 +65,8 @@ describe.skipIf(!DB_URL)("sender side e2e (emulated Privy)", () => {
     if (HOSTED_AA) zerodev = await startZeroDevEmulator(stack);
     const c = await compose({
       db,
-      chain: { chainId: CHAIN, rpcUrl: stack.rpcUrl, entryPoint: stack.entryPoint, submitterKey: SUBMITTER_KEY, bundlerUrl: zerodev?.url },
+      // tiny log ranges: every claim and refund below reaches the API through the chunked indexer
+      chain: { chainId: CHAIN, rpcUrl: stack.rpcUrl, entryPoint: stack.entryPoint, submitterKey: SUBMITTER_KEY, bundlerUrl: zerodev?.url, logChunkBlocks: 5 },
       deployment: { factory: stack.factory, validator: stack.validator, escrow: stack.escrow, token: stack.token },
       privy: { verifier: await PrivyVerifier.fromPem(emu.verificationKey(), "omniflow-test") },
       claimKeyEncryptionKey: randomBytes(32).toString("hex"),
@@ -72,6 +74,7 @@ describe.skipIf(!DB_URL)("sender side e2e (emulated Privy)", () => {
       devEndpoints: true,
       paymaster: zerodev ? { zerodev: { url: zerodev.url } } : { local: { address: stack.paymaster, signerKey: PAYMASTER_SIGNER_KEY } },
       onramp: { emulatorUrl: onUrl },
+      trustProxy: 1, // as behind one load balancer: the client address comes from X-Forwarded-For
     });
     ({ app, chain, payouts, lists } = c);
     await app.init();
@@ -429,5 +432,55 @@ describe.skipIf(!DB_URL)("sender side e2e (emulated Privy)", () => {
       svc.sponsor = real;
     }
     expect((await api.get(`/batches/${b.id}/next-step`).set(a2.headers).expect(200)).body.step).toBe("final");
+  });
+
+  it("behind a proxy the claim limiter counts clients, not the proxy", async () => {
+    const bad = { escrow: stack.escrow, depositId: `0x${"11".repeat(32)}`, recipient: alice, deadline: "1", signature: "0x" };
+    for (let i = 0; i < 10; i++) await api.post("/claims").set("x-forwarded-for", "203.0.113.7").send(bad).expect(400);
+    await api.post("/claims").set("x-forwarded-for", "203.0.113.7").send(bad).expect(429);
+    await api.post("/claims").set("x-forwarded-for", "203.0.113.8").send(bad).expect(400); // another client is not blocked
+  });
+
+  it("only our own pages may call the API from a browser", async () => {
+    const ok = await api.options("/me").set("origin", "http://app.local").set("access-control-request-method", "GET");
+    expect(ok.headers["access-control-allow-origin"]).toBe("http://app.local");
+    const claimPage = await api.options("/claims").set("origin", "http://claim.local").set("access-control-request-method", "POST");
+    expect(claimPage.headers["access-control-allow-origin"]).toBe("http://claim.local");
+    const evil = await api.options("/me").set("origin", "https://evil.test").set("access-control-request-method", "GET");
+    expect(evil.headers["access-control-allow-origin"]).toBeUndefined();
+  });
+
+  it("/health says whether the API can work, without auth and without secrets", async () => {
+    const r = await api.get("/health").expect(200);
+    expect(r.body).toMatchObject({ ok: true, checks: { db: true, rpc: true } });
+    expect(r.body.checks.bundler).toBe(HOSTED_AA ? true : null);
+    expect(r.body.submitter.address).toBe(chain.submitter);
+    expect(JSON.stringify(r.body)).not.toMatch(/[0-9a-f]{64}/i); // no keys, no hashes of secrets
+  });
+
+  it("alerts — low submitter ETH and a stuck batch reach the webhook once, then 'resolved'", async () => {
+    const got: string[] = [];
+    const hook = express();
+    hook.use(express.json());
+    hook.post("/", (req, res) => { got.push(req.body.text); res.json({ ok: true }); });
+    const srv = await new Promise<Server>((ok) => { const s = hook.listen(0, () => ok(s)); });
+    const url = `http://127.0.0.1:${(srv.address() as { port: number }).port}/`;
+    try {
+      const mined = (await db.query(`SELECT id FROM batches WHERE status='mined' LIMIT 1`)).rows[0].id;
+      await db.query(`UPDATE batches SET status='submitted', submitted_at=now() - interval '1 hour' WHERE id=$1`, [mined]);
+      const m = new Monitor(db, chain, { minSubmitterWei: 10n ** 30n, webhookUrl: url, repeatMs: 3_600_000 });
+      const h = await m.run(1_000);
+      expect(h.submitter.low).toBe(true);
+      expect(h.stuckBatches).toBe(1);
+      expect(got.some((t) => /submitter .* ETH/.test(t))).toBe(true);
+      expect(got.some((t) => /1 batch\(es\) submitted more than 15 min ago/.test(t))).toBe(true);
+      await m.run(2_000); // within the repeat window: silent
+      expect(got).toHaveLength(2);
+      await db.query(`UPDATE batches SET status='mined' WHERE id=$1`, [mined]);
+      await m.run(3_000);
+      expect(got.filter((t) => t.startsWith("✓")).map((t) => t.split("— ")[1]).sort()).toEqual(["stuck-batches"]);
+    } finally {
+      srv.close();
+    }
   });
 });

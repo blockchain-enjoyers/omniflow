@@ -352,7 +352,7 @@ export class PayoutService {
     await this.db.query(`INSERT INTO approvals (batch_id, approver, kind, signature) VALUES ($1,$2,'final',$3) ON CONFLICT DO NOTHING`, [batchId, signer, signature]);
     // With a hosted bundler the transaction hash is known only after inclusion; settleBatch records it.
     const sent = await this.chain.submitOp(op);
-    await this.db.query(`UPDATE batches SET status='submitted', tx_hash=$2 WHERE id=$1`, [batchId, sent.txHash]);
+    await this.db.query(`UPDATE batches SET status='submitted', tx_hash=$2, submitted_at=now() WHERE id=$1`, [batchId, sent.txHash]);
     return sent;
   }
 
@@ -418,11 +418,14 @@ export class PayoutService {
     const from = cur.rows[0] ? BigInt(cur.rows[0].last_block) + 1n : 0n;
     const to = await this.chain.blockNumber();
     if (from > to) return;
-    await this.applyEscrowEvents(org, from, to);
-    await this.db.query(
-      `INSERT INTO indexer_cursor (chain_id, last_block) VALUES ($1,$2) ON CONFLICT (chain_id) DO UPDATE SET last_block=EXCLUDED.last_block`,
-      [org.chain_id, to.toString()],
-    );
+    // In bounded ranges, saving the cursor after each: a restart resumes where it stopped, not from the start of a gap.
+    for (const [a, b] of this.chain.chunks(from, to)) {
+      await this.applyEscrowEvents(org, a, b);
+      await this.db.query(
+        `INSERT INTO indexer_cursor (chain_id, last_block) VALUES ($1,$2) ON CONFLICT (chain_id) DO UPDATE SET last_block=EXCLUDED.last_block`,
+        [org.chain_id, b.toString()],
+      );
+    }
   }
 
   private async applyEscrowEvents(org: { chain_id: number; escrow: Address }, from: bigint, to: bigint) {

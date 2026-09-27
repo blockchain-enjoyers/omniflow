@@ -1,0 +1,8 @@
+**/node_modules
+**/dist
+**/dist-dev
+**/dist-test
+**/.env
+**/.env.*
+!**/.env.example
+contracts

@@ -1,0 +1,30 @@
+# syntax=docker/dockerfile:1
+# Omniflow API (NestJS + scheduler). Build from omniflow/:  docker build -f Dockerfile.api -t omniflow-api .
+# Behind a TLS-intercepting proxy, pass its CA for the install step only:  --secret id=ca,src=/path/ca.crt
+# Configuration only through environment variables (apps/api/.env.example); secrets from a secret manager, never baked in.
+FROM node:22-slim
+
+WORKDIR /app
+ENV NODE_ENV=production
+
+# Only the workspaces the API runs with: development tools (the local bundler, emulators, frontends) stay out.
+COPY package.json package-lock.json tsconfig.base.json ./
+COPY packages/shared/package.json packages/shared/
+COPY packages/devmail/package.json packages/devmail/
+COPY apps/api/package.json apps/api/
+RUN --mount=type=secret,id=ca,required=false \
+    NODE_EXTRA_CA_CERTS=/run/secrets/ca npm ci --omit=dev --workspace @omniflow/api --no-audit --no-fund && npm cache clean --force
+
+COPY packages/shared packages/shared
+COPY packages/devmail packages/devmail
+COPY apps/api/src apps/api/src
+COPY apps/api/tsconfig.json apps/api/
+
+USER node
+WORKDIR /app/apps/api
+EXPOSE 3001
+# /health: 200 when the database, the chain RPC and (if configured) the bundler answer
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||3001)+'/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"
+# node itself is PID 1, so SIGTERM reaches the graceful-stop handler (npx would swallow it)
+CMD ["node", "--import", "tsx", "src/main.ts"]
