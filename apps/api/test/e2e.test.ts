@@ -162,6 +162,9 @@ describe.skipIf(!DB_URL)("slice e2e", () => {
 
   it("the replayed operation cannot pay again", async () => {
     await http_.post(`/batches/${batchId}/final`).send({ signature: "0x00" }).expect(409);
+    // and a late approver gets no new op to sign — the mined batch record stays intact
+    const late = await http_.get(`/batches/${batchId}/next-step`).query({ approver: approvers[2]!.address }).expect(200);
+    expect(late.body).toEqual({ step: "closed", status: "mined" });
   });
 
   it("emails the claim link and deletes the key", async () => {

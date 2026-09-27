@@ -273,6 +273,8 @@ export class PayoutService {
     const { batch, org } = await this.batchCtx(batchId);
     const me = org.approvers.find((a) => a.address === getAddress(approver));
     if (!me) throw new HttpError(403, "not an approver of this organisation");
+    // A batch that is no longer collecting must not get a new op draft — that would overwrite the record.
+    if (batch.status !== "collecting") return { step: "closed" as const, status: batch.status as string };
     const signed = await this.approvals(batchId);
     if (signed.some((s) => s.approver === me.address)) return { step: "done" as const };
     const weight = signed.reduce((s, a) => s + (org.approvers.find((x) => x.address === a.approver)?.weight ?? 0), 0);
