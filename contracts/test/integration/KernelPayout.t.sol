@@ -41,10 +41,18 @@ contract KernelPayoutTest is Test {
     address bundler = makeAddr("bundler");
 
     function setUp() public {
-        entryPoint = IEntryPoint(EntryPointLib.deploy());
-        Kernel impl = new Kernel(entryPoint);
-        factory = new KernelFactory(address(impl));
-        weighted = new WeightedECDSAValidator();
+        if (block.chainid == 42161 || block.chainid == 421614) {
+            // Fork of a live Arbitrum network: use the deployed bytecode (verified on Sourcify), not our build.
+            entryPoint = IEntryPoint(0x0000000071727De22E5E9d8BAf0edAc6f37da032);
+            factory = KernelFactory(0x2577507b78c2008Ff367261CB6285d44ba5eF2E9); // Kernel 0.3.3
+            weighted = WeightedECDSAValidator(0xeD89244160CfE273800B58b1B534031699dFeEEE);
+            require(address(factory.implementation()) == 0xd6CEDDe84be40893d153Be9d467CD6aD37875b28, "unexpected impl");
+        } else {
+            entryPoint = IEntryPoint(EntryPointLib.deploy());
+            Kernel impl = new Kernel(entryPoint);
+            factory = new KernelFactory(address(impl));
+            weighted = new WeightedECDSAValidator();
+        }
         usdc = new MockUSDC();
         address[] memory tokens = new address[](1);
         tokens[0] = address(usdc);
