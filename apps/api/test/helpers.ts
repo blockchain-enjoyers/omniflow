@@ -34,7 +34,7 @@ export interface LocalStack {
 export const FORK = process.env.STACK === "fork";
 const FORK_URL = process.env.FORK_URL ?? "https://sepolia-rollup.arbitrum.io/rpc";
 
-export async function startLocalStack(approvers: Address[], threshold: number): Promise<LocalStack> {
+export async function startLocalStack(approvers: Address[] = [], threshold = 1): Promise<LocalStack> {
   const port = 8600 + Math.floor(Math.random() * 300);
   const rpcUrl = `http://127.0.0.1:${port}`;
   const args = FORK ? ["--fork-url", FORK_URL] : ["--disable-code-size-limit"];
@@ -52,15 +52,18 @@ export async function startLocalStack(approvers: Address[], threshold: number): 
   execFileSync(
     `${FOUNDRY_BIN}/forge`,
     ["script", FORK ? "script/ForkStack.s.sol" : "script/LocalStack.s.sol", "--rpc-url", rpcUrl, "--private-key", DEPLOYER_KEY, "--broadcast", "--disable-code-size-limit", "--offline", "--non-interactive", "-q"],
-    { cwd: CONTRACTS, env: { ...process.env, APPROVERS: approvers.join(","), THRESHOLD: String(threshold), OUT: out }, stdio: "pipe" },
+    { cwd: CONTRACTS, env: { ...process.env, ...(approvers.length ? { APPROVERS: approvers.join(","), THRESHOLD: String(threshold) } : {}), OUT: out }, stdio: "pipe" },
   );
   const d = JSON.parse(readFileSync(resolve(CONTRACTS, out), "utf8"));
   const stack = { rpcUrl, anvil, ...d } as LocalStack;
-  if (FORK) {
-    await rpc(rpcUrl, "anvil_setBalance", [stack.account, "0x8AC7230489E80000"]); // 10 ETH gas prefund (no paymaster)
-    await mintToken(stack, stack.account, 1_000_000_000_000n);
-  }
+  if (FORK && approvers.length) await fundAccount(stack, stack.account);
   return stack;
+}
+
+/** Gas prefund (until the paymaster pays) and 1 000 000 test USDC for an organisation account. */
+export async function fundAccount(stack: LocalStack, account: Address, usdc = 1_000_000_000_000n) {
+  await rpc(stack.rpcUrl, "anvil_setBalance", [account, "0x8AC7230489E80000"]);
+  await mintToken(stack, account, usdc);
 }
 
 async function rpc(url: string, method: string, params: unknown[]) {
@@ -100,4 +103,34 @@ export async function increaseTime(rpcUrl: string, seconds: number) {
   const c = createTestClient({ chain: foundry, mode: "anvil", transport: http(rpcUrl) });
   await c.increaseTime({ seconds });
   await c.mine({ blocks: 1 });
+}
+
+// ------------------------------------------------------------------ login via the Privy EMULATOR
+
+import type pg from "pg";
+import { readDevMailbox } from "@omniflow/devmail";
+import type { PrivyEmulator } from "@omniflow/privy-emulator";
+
+export interface TestUser {
+  email: string;
+  did: string;
+  wallet: Address;
+  headers: Record<string, string>;
+  signTypedData(td: unknown): Promise<Hex>;
+  signHash(hash: Hex): Promise<Hex>;
+}
+
+/** Logs a user in through the emulator exactly as the UI does: code by email → tokens. */
+export async function loginAs(emu: PrivyEmulator, db: pg.Pool, email: string): Promise<TestUser> {
+  await emu.startEmailLogin(email);
+  const code = (await readDevMailbox(db, email))[0]!.subject.match(/\d{6}/)![0];
+  const r = await emu.verifyEmailLogin(email, code);
+  return {
+    email: r.user.email,
+    did: r.user.did,
+    wallet: r.user.wallet as Address,
+    headers: { authorization: `Bearer ${r.accessToken}`, "privy-id-token": r.identityToken },
+    signTypedData: (td) => emu.sign(r.user.did, { kind: "typedData", typedData: td }),
+    signHash: (hash) => emu.sign(r.user.did, { kind: "message", raw: hash }),
+  };
 }

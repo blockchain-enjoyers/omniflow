@@ -13,6 +13,8 @@ export interface PayoutRow {
   chainId: number;
   /** token base units */
   amount: bigint;
+  /** accounting category for reports */
+  category?: string;
 }
 
 /** A row frozen into a batch — everything needed to rebuild calldata byte for byte. */

@@ -15,7 +15,7 @@ import {
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { entryPoint07Abi } from "viem/account-abstraction";
-import { claimEscrowAbi, kernelAbi } from "@omniflow/shared";
+import { claimEscrowAbi, kernelAbi, kernelFactoryAbi } from "@omniflow/shared";
 
 /** ERC-4337 v0.7 packed user operation, as EntryPoint.handleOps takes it. */
 export interface PackedOp {
@@ -67,6 +67,22 @@ export class ChainClient {
     this.submitter = account.address;
     this.pub = createPublicClient({ chain, transport: http(cfg.rpcUrl) }) as PublicClient;
     this.wallet = createWalletClient({ chain, transport: http(cfg.rpcUrl), account });
+  }
+
+  /** Counterfactual account address for this init data and salt — the factory's own computation. */
+  accountAddress(factory: Address, initData: Hex, salt: Hex): Promise<Address> {
+    return this.pub.readContract({ address: factory, abi: kernelFactoryAbi, functionName: "getAddress", args: [initData, salt] });
+  }
+
+  /** Permissionless factory call; the submitter pays gas. Idempotent: skips if the account already has code. */
+  async deployAccount(factory: Address, initData: Hex, salt: Hex): Promise<Address> {
+    const account = await this.accountAddress(factory, initData, salt);
+    const code = await this.pub.getCode({ address: account });
+    if (code && code !== "0x") return account;
+    const { request } = await this.pub.simulateContract({ address: factory, abi: kernelFactoryAbi, functionName: "createAccount", args: [initData, salt], account: this.submitter });
+    const h = await this.wallet.writeContract({ ...request, chain: this.wallet.chain, account: this.wallet.account! });
+    if (!(await this.waitTx(h))) throw new Error("account deployment reverted");
+    return account;
   }
 
   /** Nonce of the root validator (key 0) — Kernel v3 encodes the validator in the nonce key. */

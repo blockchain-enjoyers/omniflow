@@ -16,8 +16,8 @@ import {MockUSDC} from "../test/mocks/MockTokens.sol";
 /// Env: APPROVERS (comma-separated, any order), THRESHOLD, OUT (json path).
 contract LocalStack is Script {
     function run() external {
-        address[] memory approvers = vm.envAddress("APPROVERS", ",");
-        uint24 threshold = uint24(vm.envUint("THRESHOLD"));
+        address[] memory approvers = vm.envOr("APPROVERS", ",", new address[](0));
+        uint24 threshold = uint24(vm.envOr("THRESHOLD", uint256(1)));
         require(block.chainid == 31337, "LocalStack is for anvil only");
 
         vm.startBroadcast();
@@ -41,9 +41,12 @@ contract LocalStack is Script {
             hex"",
             new bytes[](0)
         );
-        address account = factory.createAccount(initData, bytes32(0));
-        usdc.mint(account, 1_000_000e6);
-        payable(account).transfer(10 ether); // gas prefund; the slice has no paymaster
+        address account;
+        if (approvers.length > 0) {
+            account = factory.createAccount(initData, bytes32(0));
+            usdc.mint(account, 1_000_000e6);
+            payable(account).transfer(10 ether); // gas prefund when no paymaster is used
+        }
         vm.stopBroadcast();
 
         string memory o = "deploy";

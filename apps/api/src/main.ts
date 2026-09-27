@@ -1,35 +1,40 @@
-import { loadConfig } from "./config.js";
-import { createDb, migrate } from "./db/db.js";
-import { ChainClient } from "./chain/chain.js";
-import { ClaimKeyVault } from "./claimkeys/vault.js";
-import { DirectoryMailer } from "./mail/mailer.js";
-import { PayoutService } from "./payouts/service.js";
-import { createApp } from "./http/app.js";
+import { getAddress, type Address, type Hex } from "viem";
+import { compose } from "./compose.js";
 
-const cfg = loadConfig();
-const db = createDb(cfg.databaseUrl);
-await migrate(db);
-const chain = new ChainClient({ chainId: cfg.chainId, rpcUrl: cfg.rpcUrl, entryPoint: cfg.entryPoint, submitterKey: cfg.submitterKey });
-const service = new PayoutService(db, chain, new ClaimKeyVault(cfg.claimKeyEncryptionKey), new DirectoryMailer(cfg.mailDir), {
-  tokenDecimals: cfg.tokenDecimals,
-  claimTip: cfg.claimTip,
-  maxRowsPerBatch: cfg.maxRowsPerBatch,
-  claimBaseUrl: cfg.claimBaseUrl,
-  senderDisplayName: (org) => `${org} через Omniflow`,
+function need(name: string): string {
+  const v = process.env[name];
+  if (!v) throw new Error(`missing env ${name}`);
+  return v;
+}
+const addr = (n: string) => getAddress(need(n)) as Address;
+
+const { app, payouts } = await compose({
+  databaseUrl: need("DATABASE_URL"),
+  chain: { chainId: Number(need("CHAIN_ID")), rpcUrl: need("RPC_URL"), entryPoint: addr("ENTRYPOINT"), submitterKey: need("SUBMITTER_PRIVATE_KEY") as Hex },
+  deployment: { factory: addr("KERNEL_FACTORY"), validator: addr("WEIGHTED_VALIDATOR"), escrow: addr("ESCROW"), token: addr("TOKEN") },
+  privy: process.env.PRIVY_EMULATOR_URL
+    ? { emulatorUrl: process.env.PRIVY_EMULATOR_URL }
+    : { verificationKeyPem: need("PRIVY_VERIFICATION_KEY"), appId: need("PRIVY_APP_ID") },
+  claimKeyEncryptionKey: need("CLAIM_KEY_ENCRYPTION_KEY"),
+  urls: { app: need("APP_URL"), claim: need("CLAIM_BASE_URL"), form: need("FORM_BASE_URL") },
+  tokenDecimals: Number(process.env.TOKEN_DECIMALS ?? 6),
+  claimTip: BigInt(process.env.CLAIM_TIP_UNITS ?? "50000"),
+  maxRowsPerBatch: Number(process.env.MAX_ROWS_PER_BATCH ?? 40),
+  devEndpoints: process.env.DEV_ENDPOINTS === "1" && process.env.NODE_ENV !== "production",
 });
-const app = await createApp(service, chain);
-await app.listen(cfg.port);
+const port = Number(process.env.PORT ?? 3001);
+await app.listen(port);
+console.log(`omniflow api on :${port}`);
 
-// Indexer + keeper loop. Deliberately simple (no job queue; one idempotent loop is enough for now).
+// Indexer + keeper + schedules loop; every step is idempotent.
 const TICK_MS = Number(process.env.TICK_MS ?? 15_000);
 let running = false;
 setInterval(async () => {
   if (running) return;
   running = true;
   try {
-    await service.tick();
+    await payouts.tick();
   } finally {
     running = false;
   }
 }, TICK_MS);
-console.log(`omniflow api on :${cfg.port}, chain ${cfg.chainId}`);

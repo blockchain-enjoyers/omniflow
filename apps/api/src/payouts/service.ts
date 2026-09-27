@@ -39,6 +39,8 @@ export interface ServiceConfig {
   claimTip: bigint;
   maxRowsPerBatch: number;
   claimBaseUrl: string;
+  /** cabinet URL for links in emails */
+  appUrl: string;
   senderDisplayName: (orgName: string) => string;
 }
 
@@ -66,40 +68,6 @@ export class PayoutService {
 
   // ------------------------------------------------------------------ orgs
 
-  /** Registers an organisation only if its approver set matches the validator on chain. */
-  async createOrg(input: {
-    name: string;
-    account: Address;
-    validator: Address;
-    escrow: Address;
-    token: Address;
-    approvers: { address: Address; weight: number }[];
-    autoRefundDays?: number | null;
-  }) {
-    const onChain = await this.chain.readApprovers(input.validator, input.account, input.approvers.map((a) => a.address));
-    if (onChain.threshold === 0) throw new HttpError(400, "account has no weighted validator installed");
-    for (const a of input.approvers) {
-      const w = onChain.weights.find((x) => x.address === a.address)?.weight ?? 0;
-      if (w !== a.weight) throw new HttpError(400, `approver ${a.address}: weight ${a.weight} differs from chain (${w})`);
-    }
-    // Start indexing from now, not from genesis: the escrow has no events for this org before registration,
-    // and a from-0 log scan on a live chain is an unbounded RPC request.
-    const head = await this.chain.blockNumber();
-    return tx(this.db, async (c) => {
-      await c.query(`INSERT INTO indexer_cursor (chain_id, last_block) VALUES ($1,$2) ON CONFLICT DO NOTHING`, [this.chain.cfg.chainId, head.toString()]);
-      const { rows } = await c.query(
-        `INSERT INTO orgs (name, chain_id, account, validator, escrow, token, threshold, auto_refund_days)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
-        [input.name, this.chain.cfg.chainId, getAddress(input.account), getAddress(input.validator), getAddress(input.escrow), getAddress(input.token), onChain.threshold, input.autoRefundDays ?? null],
-      );
-      const orgId = rows[0].id as string;
-      for (const a of input.approvers) {
-        await c.query(`INSERT INTO approvers (org_id, address, weight) VALUES ($1,$2,$3)`, [orgId, getAddress(a.address), a.weight]);
-      }
-      return { id: orgId, threshold: onChain.threshold };
-    });
-  }
-
   private async org(orgId: string) {
     const { rows } = await this.db.query(`SELECT * FROM orgs WHERE id = $1`, [orgId]);
     if (!rows[0]) throw new HttpError(404, "org not found");
@@ -121,7 +89,7 @@ export class PayoutService {
 
   // --------------------------------------------------------------- payouts
 
-  async createPayout(orgId: string, input: { title: string; csv: string; autoRefundDays?: number | null }) {
+  async createPayout(orgId: string, input: { title: string; csv: string; autoRefundDays?: number | null; source?: string }) {
     const org = await this.org(orgId);
     const { rows, errors } = parsePayoutCsv(input.csv, this.cfg.tokenDecimals);
     if (errors.length) throw new HttpError(400, JSON.stringify(errors));
@@ -136,9 +104,9 @@ export class PayoutService {
         const status: RowStatus =
           r.chainId !== org.chain_id ? "other_chain" : !r.address && !r.email ? "waiting_details" : "ready";
         await c.query(
-          `INSERT INTO payout_rows (payout_id, row_key, name, email, address, chain_id, amount, status)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-          [payoutId, r.rowId, r.name, r.email ?? null, r.address ?? null, r.chainId, r.amount.toString(), status],
+          `INSERT INTO payout_rows (payout_id, row_key, name, email, address, chain_id, amount, status, category, details_source)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+          [payoutId, r.rowId, r.name, r.email ?? null, r.address ?? null, r.chainId, r.amount.toString(), status, r.category ?? null, input.source ?? "csv"],
         );
       }
       return { id: payoutId, rows: rows.length };
@@ -293,11 +261,13 @@ export class PayoutService {
   }
 
   /** Stores an Approve(hash) signature after checking it recovers to an approver of the org. */
-  async addApproval(batchId: string, signature: Hex) {
+  async addApproval(batchId: string, signature: Hex, expectedSigner?: Address) {
     const { batch, org } = await this.batchCtx(batchId);
     if (batch.status !== "collecting") throw new HttpError(409, `batch is ${batch.status}`);
     const signer = await recoverTypedDataAddress({ ...approveTypedData(org.validator, org.chain_id, batch.approve_hash), signature });
     if (!org.approvers.some((a) => a.address === signer)) throw new HttpError(403, "signature is not from an approver");
+    // Checked BEFORE storing: a caller must not be able to file someone else's (genuine) signature.
+    if (expectedSigner && getAddress(expectedSigner) !== signer) throw new HttpError(403, "signature is not from your wallet");
     const res = await this.db.query(
       `INSERT INTO approvals (batch_id, approver, kind, signature) VALUES ($1,$2,'approve',$3) ON CONFLICT DO NOTHING`,
       [batchId, signer, signature],
@@ -307,13 +277,14 @@ export class PayoutService {
   }
 
   /** Final signature over userOpHash: assemble approve signatures + this one, relay to EntryPoint. */
-  async submitFinal(batchId: string, signature: Hex) {
+  async submitFinal(batchId: string, signature: Hex, expectedSigner?: Address) {
     const { batch, org } = await this.batchCtx(batchId);
     if (batch.status !== "collecting") throw new HttpError(409, `batch is ${batch.status}`);
     if (!batch.final_op || !batch.user_op_hash) throw new HttpError(409, "no op prepared — call next-step first");
     const signer = getAddress(await recoverAddress({ hash: hashMessage({ raw: batch.user_op_hash }), signature }));
     const me = org.approvers.find((a) => a.address === signer);
     if (!me) throw new HttpError(403, "signature is not from an approver");
+    if (expectedSigner && getAddress(expectedSigner) !== signer) throw new HttpError(403, "signature is not from your wallet");
     const approvals = (await this.approvals(batchId)).filter((a) => a.kind === "approve" && a.approver !== signer);
     const weight = approvals.reduce((s, a) => s + (org.approvers.find((x) => x.address === a.approver)?.weight ?? 0), 0);
     if (weight + me.weight < org.threshold) throw new HttpError(409, "threshold not reached");
@@ -355,6 +326,7 @@ export class PayoutService {
     });
     await this.applyEscrowEvents(org, r.blockNumber, r.blockNumber);
     await this.sendClaimEmails(m.payoutId);
+    if (r.success) await this.notifyApprovers(batchId, "sent");
   }
 
   /** Scans escrow events (claims, refunds, expiries) from the cursor; idempotent per log. */
@@ -452,6 +424,65 @@ export class PayoutService {
         depositId: r.deposit_id,
       })),
     };
+  }
+
+  async listPayouts(orgId: string) {
+    return (
+      await this.db.query(
+        `SELECT p.id, p.title, p.status, p.created_at, count(r.*)::int AS rows, coalesce(sum(r.amount),0)::text AS total
+           FROM payouts p LEFT JOIN payout_rows r ON r.payout_id=p.id WHERE p.org_id=$1 GROUP BY p.id ORDER BY p.created_at DESC`,
+        [orgId],
+      )
+    ).rows;
+  }
+
+  async balance(orgId: string) {
+    const org = await this.org(orgId);
+    const [token, eth] = await Promise.all([
+      this.chain.pub.readContract({
+        address: org.token,
+        abi: [{ type: "function", name: "balanceOf", stateMutability: "view", inputs: [{ type: "address" }], outputs: [{ type: "uint256" }] }],
+        functionName: "balanceOf",
+        args: [org.account],
+      }) as Promise<bigint>,
+      this.chain.pub.getBalance({ address: org.account }),
+    ]);
+    const reserved = await this.db.query(
+      `SELECT coalesce(sum(r.amount),0)::text AS s FROM payout_rows r JOIN payouts p ON p.id=r.payout_id WHERE p.org_id=$1 AND r.status='in_escrow'`,
+      [orgId],
+    );
+    // unclaimed escrow is the sender's money, reserved — not spent.
+    return { account: org.account, token: org.token, balance: token, reservedInEscrow: BigInt(reserved.rows[0].s), gasBalance: eth };
+  }
+
+  /**
+   * approvers learn what is waiting and what left. "pending" — a batch needs signatures; "sent" — executed.
+   */
+  async notifyApprovers(batchId: string, kind: "pending" | "sent") {
+    const { batch, org } = await this.batchCtx(batchId);
+    const m = manifestFromJson(batch.manifest);
+    const total = m.rows.reduce((s, r) => (r.kind === "refund" ? s : s + r.amount + (r.kind === "escrow" ? r.tip : 0n)), 0n);
+    const amount = `${(Number(total) / 10 ** this.cfg.tokenDecimals).toLocaleString("ru-RU")} USDC`;
+    const emails = (await this.db.query(`SELECT email FROM org_members WHERE org_id=$1 AND 'approver' = ANY(roles) AND status<>'removed'`, [org.id])).rows;
+    for (const e of emails) {
+      await this.mailer.send(
+        kind === "pending"
+          ? {
+              to: e.email,
+              subject: `${org.name}: выплата ждёт вашего подтверждения — ${amount}`,
+              text: batch.kind === "revoke"
+                ? `Оператор просит отозвать неполученные платежи (${m.rows.length}). Деньги вернутся на аккаунт организации.
+Открыть: ${this.cfg.appUrl}#/approve/${batchId}`
+                : `С аккаунта организации ${org.account} уйдёт ${amount}, ${m.rows.length} получателям.
+Проверьте и подтвердите: ${this.cfg.appUrl}#/approve/${batchId}`,
+            }
+          : {
+              to: e.email,
+              subject: `${org.name}: с аккаунта ушло ${amount}`,
+              text: `Партия исполнена. Транзакция ${batch.tx_hash}. Квитанция: ${this.cfg.appUrl}#/payout/${m.payoutId}`,
+            },
+      );
+    }
   }
 
   // ----------------------------------------------------------------- utils

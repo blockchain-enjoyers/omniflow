@@ -19,8 +19,8 @@ contract ForkStack is Script {
 
     function run() external {
         require(block.chainid == 421614, "ForkStack targets an Arbitrum Sepolia fork only");
-        address[] memory approvers = vm.envAddress("APPROVERS", ",");
-        uint24 threshold = uint24(vm.envUint("THRESHOLD"));
+        address[] memory approvers = vm.envOr("APPROVERS", ",", new address[](0));
+        uint24 threshold = uint24(vm.envOr("THRESHOLD", uint256(1)));
         address[] memory sorted = _sortDesc(approvers);
         uint24[] memory weights = new uint24[](sorted.length);
         for (uint256 i; i < sorted.length; ++i) weights[i] = 1;
@@ -37,7 +37,7 @@ contract ForkStack is Script {
         address[] memory tokens = new address[](1);
         tokens[0] = USDC_SEPOLIA;
         ClaimEscrow escrow = new ClaimEscrow(tokens);
-        address account = KernelFactory(FACTORY_031).createAccount(initData, bytes32(0));
+        address account = approvers.length > 0 ? KernelFactory(FACTORY_031).createAccount(initData, bytes32(0)) : address(0);
         vm.stopBroadcast();
 
         string memory o = "deploy";

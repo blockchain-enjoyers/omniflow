@@ -7,7 +7,7 @@ export interface CsvError {
 }
 
 /**
- * CSV: name,email,address,chain_id,amount — header required, amount in token units (e.g. "1500.50").
+ * CSV: name,email,address,chain_id,amount[,category] — header required, amount in token units (e.g. "1500.50").
  * A row may lack address or email; the review screen reports what cannot be sent.
  */
 export function parsePayoutCsv(text: string, decimals: number): { rows: PayoutRow[]; errors: CsvError[] } {
@@ -21,7 +21,7 @@ export function parsePayoutCsv(text: string, decimals: number): { rows: PayoutRo
   }
   lines.forEach((l, i) => {
     const line = i + 2;
-    const [name, email, address, chainId, amount] = l.split(",").map((c) => c.trim());
+    const [name, email, address, chainId, amount, category] = l.split(",").map((c) => c.trim());
     if (!name) return errors.push({ line, message: "name is required" });
     if (address && !isAddress(address)) return errors.push({ line, message: "invalid address" });
     if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return errors.push({ line, message: "invalid email" });
@@ -41,6 +41,7 @@ export function parsePayoutCsv(text: string, decimals: number): { rows: PayoutRo
       address: address ? (getAddress(address) as Address) : undefined,
       chainId: cid,
       amount: units,
+      category: header[5] === "category" && category ? category : undefined,
     });
   });
   return { rows, errors };
