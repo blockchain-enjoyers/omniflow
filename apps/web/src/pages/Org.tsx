@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import QRCode from "qrcode";
 import { useAuth } from "@omniflow/auth-client";
 import { call, type Org, type PayoutListItem } from "../api";
-import { Err, Section, short, status, usdc, useAction, useLoad } from "../ui";
+import { chainName, Err, Section, short, status, usdc, useAction, useLoad } from "../ui";
 
 const TABS: [string, string][] = [
   ["payouts", "Выплаты"], ["book", "Адресная книга"], ["schedules", "Регулярные"], ["topup", "Пополнить"],
@@ -52,7 +53,7 @@ function Payouts({ org }: { org: Org }) {
     <>
       {isOp && (
         <Section title="Новая выплата из CSV" testid="new-payout">
-          <p className="hint">Колонки: name,email,address,chain_id,amount[,category]. Адреса или почты может не быть — строка подождёт реквизитов. Сеть выплаты — {org.chain_id}.</p>
+          <p className="hint">Колонки: name,email,address,chain_id,amount[,category]. Адреса или почты может не быть — строка подождёт реквизитов. Сеть выплаты — {chainName(org.chain_id)}, в колонке chain_id — {org.chain_id}.</p>
           <input data-testid="payout-title" placeholder="Название" value={title} onChange={(e) => setTitle(e.target.value)} />
           <textarea data-testid="payout-csv" value={csv} onChange={(e) => setCsv(e.target.value)} />
           <label>Автовозврат неполученного через, дней (пусто — как в настройках: {org.auto_refund_days ?? "бессрочно"}) <input value={override} style={{ width: 80 }} onChange={(e) => setOverride(e.target.value)} /></label>
@@ -168,6 +169,15 @@ function Schedules({ org }: { org: Org }) {
   );
 }
 
+/** The account address as a QR code — the plain address, the same string as above (no payment URI). */
+function AddressQr({ address }: { address: string }) {
+  const [src, setSrc] = useState("");
+  useEffect(() => {
+    QRCode.toDataURL(address, { margin: 1, width: 180 }).then(setSrc, () => setSrc(""));
+  }, [address]);
+  return src ? <img src={src} alt={`QR: ${address}`} width={180} height={180} data-testid="topup-qr" /> : null;
+}
+
 function TopUp({ org, onDone }: { org: Org; onDone: () => void }) {
   const auth = useAuth();
   const [amount, setAmount] = useState("1000");
@@ -177,12 +187,13 @@ function TopUp({ org, onDone }: { org: Org; onDone: () => void }) {
   return (
     <>
       <Section title="Пополнить из Safe или с кошелька" testid="topup">
-        <p>Отправьте USDC в сети {org.chain_id} на адрес аккаунта организации:</p>
+        <p>Отправьте USDC в сети <b>{chainName(org.chain_id)}</b> на адрес аккаунта организации:</p>
         <p className="mono big" data-testid="topup-address">{org.account}</p>
+        <AddressQr address={org.account} />
         <ul className="hint">
           <li>В Safe: «New transaction» → «Send tokens» → USDC → этот адрес. Подписывают подписанты Safe, как обычно.</li>
           <li>Сверьте адрес с тем, что подтверждали подтверждающие при создании. Первый раз — пробный перевод на небольшую сумму.</li>
-          <li>Только сеть {org.chain_id}. USDC из другой сети сюда не дойдёт.</li>
+          <li>Только {chainName(org.chain_id)}. USDC из другой сети на этот адрес не дойдёт.</li>
           <li>Газ за выплаты платит Omniflow — ETH на аккаунте не нужен.</li>
         </ul>
       </Section>

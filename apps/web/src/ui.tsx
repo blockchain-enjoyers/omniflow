@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { formatUnits } from "viem";
 
 export const usdc = (units: string | bigint) => `${Number(formatUnits(BigInt(units), 6)).toLocaleString("ru-RU", { maximumFractionDigits: 6 })} USDC`;
+const CHAINS: Record<number, string> = { 42161: "Arbitrum One", 421614: "Arbitrum Sepolia (тестовая)", 31337: "локальная сеть (anvil)" };
+export const chainName = (id: number) => CHAINS[id] ?? `сеть ${id}`;
 export const short = (a?: string | null) => (a ? `${a.slice(0, 6)}…${a.slice(-4)}` : "—");
 
 export function useLoad<T>(fn: () => Promise<T>, deps: unknown[]) {

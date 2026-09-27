@@ -45,3 +45,78 @@ export async function mintToken(rpcUrl: string, token: Address, to: Address, amo
 export async function setEthBalance(rpcUrl: string, who: Address, wei: bigint) {
   await rpc(rpcUrl, "anvil_setBalance", [who, `0x${wei.toString(16)}`]);
 }
+
+// ------------------------------------------------------------------ anvil + deployment of the contract stack
+
+import { execFileSync, spawn, type ChildProcess } from "node:child_process";
+import { mkdirSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { mnemonicToAccount, privateKeyToAccount } from "viem/accounts";
+
+/** anvil's publicly known development mnemonic — test-only keys, never used on a real network. */
+const ANVIL_MNEMONIC = "test test test test test test test test test test test junk";
+export const anvilKey = (i: number): Hex => {
+  const acc = mnemonicToAccount(ANVIL_MNEMONIC, { addressIndex: i });
+  return `0x${Buffer.from(acc.getHdKey().privateKey!).toString("hex")}`;
+};
+export const DEPLOYER_KEY = anvilKey(0);
+export const SUBMITTER_KEY = anvilKey(1);
+/** signs sponsorships for the emulated VerifyingPaymaster (test-only anvil key) */
+export const PAYMASTER_SIGNER_KEY = anvilKey(2);
+
+export interface DevStack {
+  rpcUrl: string;
+  chainId: number;
+  anvil: ChildProcess;
+  entryPoint: Address;
+  validator: Address;
+  token: Address;
+  escrow: Address;
+  account: Address;
+  factory: Address;
+  paymaster: Address;
+}
+
+export interface DevStackOptions {
+  /** anvil fork of Arbitrum Sepolia with the deployed Kernel 0.3.1, validator and Circle USDC */
+  fork?: boolean;
+  forkUrl?: string;
+  port?: number;
+  contractsDir: string;
+  foundryBin?: string;
+  /** optional pre-made account (tests); the app creates its own accounts through flow 1 */
+  approvers?: Address[];
+  threshold?: number;
+}
+
+/** Starts anvil and deploys the stack with script/LocalStack.s.sol (from source) or script/ForkStack.s.sol (fork). */
+export async function startDevStack(o: DevStackOptions): Promise<DevStack> {
+  const bin = o.foundryBin ?? process.env.FOUNDRY_BIN ?? "/root/.foundry/bin";
+  const port = o.port ?? 8600 + Math.floor(Math.random() * 300);
+  const rpcUrl = `http://127.0.0.1:${port}`;
+  const args = o.fork ? ["--fork-url", o.forkUrl ?? "https://sepolia-rollup.arbitrum.io/rpc"] : ["--disable-code-size-limit"];
+  const anvil = spawn(`${bin}/anvil`, ["--port", String(port), "--silent", ...args], { stdio: "ignore" });
+  let chainId = 0;
+  for (let i = 0; i < 150 && !chainId; i++) {
+    try {
+      chainId = Number(await rpc(rpcUrl, "eth_chainId", []));
+    } catch {
+      await new Promise((r) => setTimeout(r, 200));
+    }
+  }
+  if (!chainId) throw new Error(`anvil did not start on ${rpcUrl}`);
+  mkdirSync(resolve(o.contractsDir, "deployments"), { recursive: true });
+  const out = `deployments/stack-${port}.json`;
+  const approvers = o.approvers ?? [];
+  execFileSync(
+    `${bin}/forge`,
+    ["script", o.fork ? "script/ForkStack.s.sol" : "script/LocalStack.s.sol", "--rpc-url", rpcUrl, "--private-key", DEPLOYER_KEY, "--broadcast", "--disable-code-size-limit", "--offline", "--non-interactive", "-q"],
+    {
+      cwd: o.contractsDir,
+      env: { ...process.env, ...(approvers.length ? { APPROVERS: approvers.join(","), THRESHOLD: String(o.threshold ?? 1) } : {}), PAYMASTER_SIGNER: privateKeyToAccount(PAYMASTER_SIGNER_KEY).address, OUT: out },
+      stdio: "pipe",
+    },
+  );
+  const d = JSON.parse(readFileSync(resolve(o.contractsDir, out), "utf8"));
+  return { rpcUrl, chainId, anvil, ...d } as DevStack;
+}

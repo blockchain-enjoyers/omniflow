@@ -11,3 +11,10 @@ export const DEFAULT_RPC: Record<number, string> = {
 };
 
 export const RELAYER_URL: string | undefined = import.meta.env.VITE_RELAYER_URL || undefined;
+
+/**
+ * Optional login: the recipient signs in by email and receives into their embedded wallet — via Privy, or the
+ * Privy emulator in development. Without either the page still works: paste an address or use your own wallet.
+ */
+export const PRIVY_APP_ID: string | undefined = import.meta.env.VITE_PRIVY_APP_ID || undefined;
+export const PRIVY_EMULATOR_URL: string | undefined = import.meta.env.VITE_PRIVY_EMULATOR_URL || undefined;

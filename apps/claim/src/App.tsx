@@ -1,18 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
 import { formatUnits, isAddress, type Address, type EIP1193Provider } from "viem";
 import { DepositStatus, parseClaimLink, type ClaimLink } from "@omniflow/shared";
+import { LoginForm, useAuth } from "@omniflow/auth-client";
 import { DEFAULT_RPC, RELAYER_URL } from "./config";
 import { claimViaRelayer, claimWithOwnWallet, readDeposit, type DepositView } from "./claim";
 
-declare global {
-  interface Window {
-    ethereum?: EIP1193Provider;
-  }
-}
+// window.ethereum is typed `any` by the Privy SDK's globals; narrow it here.
+const injected = () => (window as unknown as { ethereum?: EIP1193Provider }).ethereum;
 
 type Phase = { kind: "idle" } | { kind: "working" } | { kind: "done"; recipient: string; hash: string } | { kind: "error"; message: string };
 
-export function App() {
+export function App({ withLogin }: { withLogin: boolean }) {
   const link = useMemo<ClaimLink | Error>(() => {
     try {
       return parseClaimLink(window.location.href);
@@ -64,15 +62,18 @@ export function App() {
 
       {deposit?.status === DepositStatus.Pending && phase.kind !== "done" && (
         <>
+          {RELAYER_URL && withLogin && (
+            <EmbeddedClaim busy={phase.kind === "working"} onClaim={(wallet) => run(async () => ({ recipient: wallet, hash: await claimViaRelayer(RELAYER_URL!, link, wallet, rpc) }))} />
+          )}
           {RELAYER_URL && (
             <section>
-              <h2>Получить на адрес</h2>
+              <h2>{withLogin ? "Или на свой адрес" : "Получить на адрес"}</h2>
               <p>Вставьте адрес своего кошелька в сети {link.chainId}. Газ за получение платит отправитель.</p>
               <input data-testid="address" placeholder="0x…" value={address} onChange={(e) => setAddress(e.target.value.trim())} />
               <button
                 data-testid="claim-relayer"
                 disabled={!isAddress(address) || phase.kind === "working"}
-                onClick={() => run(async () => ({ recipient: address, hash: await claimViaRelayer(RELAYER_URL!, link, address as Address) }))}
+                onClick={() => run(async () => ({ recipient: address, hash: await claimViaRelayer(RELAYER_URL!, link, address as Address, rpc) }))}
               >
                 Получить
               </button>
@@ -81,8 +82,8 @@ export function App() {
           <section>
             <h2>{RELAYER_URL ? "Или своим кошельком" : "Получить своим кошельком"}</h2>
             <p>Кошелёк отправит транзакцию сам — нужен немного ETH на газ. Работает, даже если сервисы Omniflow недоступны.</p>
-            <button data-testid="claim-wallet" disabled={!window.ethereum || phase.kind === "working"} onClick={() => run(() => claimWithOwnWallet(window.ethereum!, link, rpc))}>
-              {window.ethereum ? "Подключить кошелёк и получить" : "Кошелёк в браузере не найден"}
+            <button data-testid="claim-wallet" disabled={!injected() || phase.kind === "working"} onClick={() => run(() => claimWithOwnWallet(injected()!, link, rpc))}>
+              {injected() ? "Подключить кошелёк и получить" : "Кошелёк в браузере не найден"}
             </button>
           </section>
         </>
@@ -105,5 +106,36 @@ export function App() {
         <p>Ссылка — единственный ключ к платежу. Не пересылайте её. Omniflow никогда не попросит сид-фразу или подпись.</p>
       </details>
     </main>
+  );
+}
+
+/** sign in by email; the payment goes to the embedded wallet created at login. Gas is paid by the relayer. */
+function EmbeddedClaim({ busy, onClaim }: { busy: boolean; onClaim: (wallet: Address) => void }) {
+  const auth = useAuth();
+  if (!auth.ready) return null;
+  return (
+    <section>
+      <h2>Получить по почте</h2>
+      {!auth.user ? (
+        <>
+          <p>Войдите по почте — кошелёк создастся сам, ничего устанавливать не нужно.</p>
+          <LoginForm />
+        </>
+      ) : !auth.user.wallet ? (
+        <p>Кошелёк ещё создаётся — обновите страницу через несколько секунд.</p>
+      ) : (
+        <>
+          <p>
+            Вы вошли как {auth.user.email ?? auth.user.did}. Платёж придёт на ваш кошелёк <code data-testid="embedded-wallet">{auth.user.wallet}</code>.
+          </p>
+          <button data-testid="claim-embedded" disabled={busy} onClick={() => onClaim(auth.user!.wallet!)}>
+            Получить
+          </button>
+          <button className="link" onClick={() => void auth.logout()}>
+            Выйти
+          </button>
+        </>
+      )}
+    </section>
   );
 }

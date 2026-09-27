@@ -21,9 +21,19 @@ export async function readDeposit(link: ClaimLink, rpc: string): Promise<Deposit
   return { amount: d.amount, decimals, symbol, status: d.status as DepositStatus, autoRefundAt: d.autoRefundAt };
 }
 
+/**
+ * The claim deadline is checked against block.timestamp, so it is taken from the chain, not from this computer's
+ * clock: a skewed clock (or a test chain moved forward in time) would otherwise make every claim "expired".
+ */
+export async function chainDeadline(link: ClaimLink, rpc: string, seconds = 3600): Promise<bigint> {
+  const pub = createPublicClient({ chain: chainOf(link.chainId, rpc), transport: http(rpc) });
+  const b = await pub.getBlock({ blockTag: "latest" });
+  return b.timestamp + BigInt(seconds);
+}
+
 /** Claims via the Omniflow relayer: no gas needed from the recipient. */
-export async function claimViaRelayer(relayer: string, link: ClaimLink, recipient: Address): Promise<Hex> {
-  const deadline = BigInt(Math.floor(Date.now() / 1000) + 3600);
+export async function claimViaRelayer(relayer: string, link: ClaimLink, recipient: Address, rpc: string): Promise<Hex> {
+  const deadline = await chainDeadline(link, rpc);
   const signature = await signClaim(link, recipient, deadline);
   const r = await fetch(`${relayer.replace(/\/$/, "")}/claims`, {
     method: "POST",
@@ -40,7 +50,7 @@ export async function claimWithOwnWallet(provider: EIP1193Provider, link: ClaimL
   const wallet = createWalletClient({ chain: chainOf(link.chainId, rpc), transport: custom(provider) });
   const [recipient] = await wallet.requestAddresses();
   if (!recipient) throw new Error("wallet returned no address");
-  const deadline = BigInt(Math.floor(Date.now() / 1000) + 3600);
+  const deadline = await chainDeadline(link, rpc);
   const signature = await signClaim(link, recipient, deadline);
   const hash = await wallet.writeContract({ account: recipient, address: link.escrow, abi: claimEscrowAbi, functionName: "claim", args: [link.depositId, recipient, deadline, signature] });
   const pub = createPublicClient({ chain: chainOf(link.chainId, rpc), transport: http(rpc) });
