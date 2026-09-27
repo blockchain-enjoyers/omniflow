@@ -29,3 +29,16 @@
   .topup-grid { grid-template-columns: minmax(0, 1fr); }
   .approve-total { font-size: 28px; }
 }
+/* demo / real */
+.demo-banner { background: var(--warn-soft); color: var(--text); border-bottom: 1px solid color-mix(in srgb, var(--warn) 30%, transparent); text-align: center; font-size: 13px; padding: 6px 16px; }
+.demo-banner b { color: var(--warn); }
+.auth-card.wide { max-width: 760px; }
+.mode-card { display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
+.mode-card .hint { flex: 1; margin: 0; }
+.mode-card button { margin-top: 6px; }
+.show-phone { display: none; }
+@media (max-width: 720px) {
+  .hide-phone { display: none; }
+  .show-phone { display: inline; }
+  .topbar-inner { gap: 6px; }
+}

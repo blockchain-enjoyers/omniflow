@@ -51,13 +51,13 @@ export function onrampEmulator(cfg: OnrampEmulatorConfig) {
     const s = sessions.get(req.params.id);
     if (!s) return res.status(404).send("not found");
     const esc = (x: string) => x.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
-    res.type("html").send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Buy USDC — emulator</title>
+    res.type("html").send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Buy USDC — demo mode</title>
 <style>body{font-family:system-ui;max-width:460px;margin:40px auto;padding:0 16px}.b{border:1px dashed #c60;padding:8px;color:#c60}button{padding:10px 16px}</style></head><body>
-<p class="b">ON-RAMP PARTNER EMULATOR. No real partner is chosen yet. No payment happens — test USDC is credited on the local chain.</p>
+<p class="b">Demo mode — no real payment happens. Test USDC is credited on the demo network.</p>
 <h1>Buy ${esc(s.cryptoAmount)} USDC</h1>
 <p>You pay: ${s.fiatAmount} ${esc(s.currency)} · fee ${cfg.feePercent}% (placeholder)</p>
 <p>Destination: <code data-testid="dest">${esc(s.address)}</code><br><small>Check that this is your organization account address.</small></p>
-${s.status === "completed" ? `<p data-testid="done">Done: ${esc(s.cryptoAmount)} USDC credited.</p>${s.returnUrl ? `<p><a href="${esc(s.returnUrl)}">Back</a></p>` : ""}` : `<form method="post" action="/sessions/${s.id}/pay"><button data-testid="pay">Pay by card (emulated)</button></form>`}
+${s.status === "completed" ? `<p data-testid="done">Done: ${esc(s.cryptoAmount)} USDC credited.</p>${s.returnUrl ? `<p><a href="${esc(s.returnUrl)}">Back</a></p>` : ""}` : `<form method="post" action="/sessions/${s.id}/pay"><button data-testid="pay">Pay by card (demo)</button></form>`}
 </body></html>`);
   });
 

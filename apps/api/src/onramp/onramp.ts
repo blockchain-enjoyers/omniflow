@@ -8,7 +8,7 @@ export interface OnrampProvider {
 }
 
 export class EmulatedOnramp implements OnrampProvider {
-  name = "On-ramp emulator";
+  name = "Card purchase (demo)";
   constructor(private readonly url: string) {}
 
   async createSession(input: { account: Address; fiatAmount: number; currency: string; returnUrl?: string }) {

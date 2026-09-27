@@ -41,7 +41,8 @@ describe.skipIf(!DB_URL)("the application through the browser", () => {
   const linkIn = async (to: string, subject: RegExp, base: string) => {
     const m = (await mail(to)).find((x) => subject.test(x.subject));
     if (!m) throw new Error(`no mail "${subject}" for ${to}`);
-    return m.body.match(new RegExp(`${base.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/#\\S+`))![0];
+    // links from the demo backend carry ?mode=demo
+    return m.body.match(new RegExp(`${base.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/(\\?mode=demo)?#\\S+`))![0];
   };
   const balance = (who: Address) => stack.api.chain.pub.readContract({ address: stack.chain.token, abi: erc20Abi, functionName: "balanceOf", args: [who] });
   const text = async (page: Page, testid: string) => ((await page.getByTestId(testid).textContent()) ?? "").replace(/\s/g, " ");
@@ -73,9 +74,10 @@ describe.skipIf(!DB_URL)("the application through the browser", () => {
     await page.getByTestId("login-verify").click();
   }
   const newPage = async () => (await browser.newContext({ viewport: DESKTOP, colorScheme: "light" })).newPage();
+  const demoUrl = () => `${stack.urls.web}/?mode=demo`;
   async function person(email: string) {
     const page = await newPage();
-    await page.goto(`${stack.urls.web}/`);
+    await page.goto(`${demoUrl()}#/`);
     await login(page, email);
     await expect.poll(() => page.getByTestId("me").textContent()).toContain(email);
     pages[email] = page;
@@ -145,13 +147,22 @@ describe.skipIf(!DB_URL)("the application through the browser", () => {
   // ------------------------------------------------------------------ the main path
 
   it("flow 1: the creator names approvers; each joins and signs the set; the account is deployed", async () => {
+    // always a choice: demo or real; real stays off until Privy and the network are configured
     const start = await newPage();
     await start.goto(`${stack.urls.web}/`);
+    await start.getByTestId("mode-card-demo").waitFor();
+    expect(await start.getByTestId("mode-real").isDisabled()).toBe(true);
+    expect(await start.getByTestId("mode-real").textContent()).toBe("Not set up yet");
+    await shot(start, "mode-choice");
+    await start.getByTestId("mode-demo").click();
     await start.getByTestId("login-email").waitFor();
+    expect(await start.textContent("body")).toContain("Demo mode");
+    expect(await start.textContent("body")).not.toMatch(/emulat/i);
     await shot(start, "login");
     await start.context().close();
 
     const p = await person(ops);
+    await p.getByTestId("demo-banner").waitFor();
     await shot(p, "home-empty");
     await p.getByTestId("new-org").click();
     await p.getByTestId("org-name").fill("Acme");
@@ -254,6 +265,7 @@ describe.skipIf(!DB_URL)("the application through the browser", () => {
     page.on("request", (r) => requests.push(r.url() + (r.postData() ?? "")));
     await page.goto(link);
     await expect.poll(() => page.getByTestId("amount").textContent()).toMatch(/^250 /);
+    await page.getByTestId("demo-badge").waitFor(); // a demo payment says so; the recipient chooses nothing
     await shot(page, "claim");
     await login(page, "carol@example.test");
     const wallet = (await page.getByTestId("embedded-wallet").textContent()) as Address;
@@ -418,7 +430,7 @@ describe.skipIf(!DB_URL)("the application through the browser", () => {
 
   it("the dev mailbox lists the letters", async () => {
     const p = pages[ops]!;
-    await p.goto(`${stack.urls.web}/#/dev/mailbox`);
+    await p.goto(`${demoUrl()}#/demo/mailbox`);
     await expect.poll(() => p.getByTestId("mail").count()).toBeGreaterThan(5);
     await shot(p, "mailbox");
   });
@@ -434,7 +446,7 @@ describe.skipIf(!DB_URL)("the application through the browser", () => {
       [o, `${stack.urls.web}/#/setup/new`, "setup-new"],
       [pages[a1]!, setupUrl, "setup"],
       [pages[a1]!, approveUrlSeen, "approve"],
-      [o, `${stack.urls.web}/#/dev/mailbox`, "mailbox"],
+      [o, `${demoUrl()}#/demo/mailbox`, "mailbox"],
     ];
     for (const [page, url, what] of screens) {
       await page.goto(url);
@@ -442,7 +454,7 @@ describe.skipIf(!DB_URL)("the application through the browser", () => {
       await fitsPhone(page, what);
     }
     const guest = await newPage();
-    for (const [url, what] of [[formUrl, "details form"], [lastClaimUrl, "claim page"], [`${stack.urls.web}/`, "login"]] as const) {
+    for (const [url, what] of [[formUrl, "details form"], [lastClaimUrl, "claim page"], [`${stack.urls.web}/`, "mode choice"]] as const) {
       await guest.goto(url);
       await guest.waitForLoadState("networkidle");
       await fitsPhone(guest, what);
@@ -454,5 +466,15 @@ describe.skipIf(!DB_URL)("the application through the browser", () => {
     await o.goto(payoutUrl);
     await o.getByTestId("rows").waitFor();
     await shot(o, "payout", { dark: true });
+  });
+
+  it("switching mode signs out and returns to the choice", async () => {
+    const p = pages[ops]!;
+    await p.goto(`${stack.urls.web}/#/`);
+    await p.getByTestId("mode-badge").waitFor();
+    await p.getByTestId("mode-switch").click();
+    await p.getByTestId("mode-card-demo").waitFor();
+    await p.getByTestId("mode-demo").click();
+    await p.getByTestId("login-email").waitFor(); // signed out: the demo session did not survive the switch
   });
 });

@@ -10,10 +10,10 @@ export function Mailbox() {
   return (
     <>
       <div className="page-head">
-        <div><h1>Dev mailbox</h1><div className="sub">Every email the app would send: login codes, invitations, payment links.</div></div>
+        <div><h1>Demo mailbox</h1><div className="sub">Demo mode delivers every email here: sign-in codes, invitations, payment links.</div></div>
         <a href="#/" className="btn secondary">← Dashboard</a>
       </div>
-      <Callout tone="emu">Emulated email: no provider is chosen yet. Nobody receives real emails.</Callout>
+      <Callout tone="warn">Demo mode — these emails are not sent to anyone.</Callout>
       <Section flush testid="mailbox" title="Emails" actions={
         <>
           <input className="input-inline" style={{ width: 220 }} placeholder="filter by address" value={to} onChange={(e) => setTo(e.target.value.trim())} />

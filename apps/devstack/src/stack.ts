@@ -137,7 +137,8 @@ export async function startStack(o: StackOptions): Promise<RunningStack> {
       deployment: { factory: chain.factory, validator: chain.validator, escrow: chain.escrow, token: chain.token },
       privy: { verifier: await PrivyVerifier.fromPem(emulator.verificationKey(), "omniflow-dev") },
       claimKeyEncryptionKey: randomBytes(32).toString("hex"),
-      urls: { app: `${webUrl}/`, claim: `${claimUrl}/`, form: `${webUrl}/` },
+      // every link this (demo) backend sends opens in demo mode
+      urls: { app: `${webUrl}/?mode=demo`, claim: `${claimUrl}/?mode=demo`, form: `${webUrl}/?mode=demo` },
       paymaster: zerodevUrl ? { zerodev: { url: zerodevUrl } } : { local: { address: chain.paymaster, signerKey: PAYMASTER_SIGNER_KEY } },
       onramp: { emulatorUrl: onrampUrl },
       devEndpoints: true,
@@ -148,12 +149,13 @@ export async function startStack(o: StackOptions): Promise<RunningStack> {
     log("building the dashboard and the claim page…");
     webApp.use(
       express.static(
-        buildFrontend("web", { VITE_API_URL: apiUrl, VITE_PRIVY_EMULATOR_URL: privyUrl, VITE_PRIVY_APP_ID: "", VITE_DEV_TOOLS: "1", VITE_CHAIN_NAME: o.fork ? "Arbitrum Sepolia (fork)" : "local chain" }),
+        // demo mode is served here; real mode appears when VITE_API_URL and VITE_PRIVY_APP_ID are in the environment
+        buildFrontend("web", { VITE_DEMO_API_URL: apiUrl, VITE_DEMO_AUTH_URL: privyUrl }),
       ),
     );
     claimApp.use(
       express.static(
-        buildFrontend("claim", { VITE_RELAYER_URL: apiUrl, VITE_PRIVY_EMULATOR_URL: privyUrl, VITE_PRIVY_APP_ID: "", [`VITE_RPC_${chain.chainId}`]: chain.rpcUrl }),
+        buildFrontend("claim", { VITE_DEMO_RELAYER_URL: apiUrl, VITE_DEMO_AUTH_URL: privyUrl, VITE_DEMO_RPC: chain.rpcUrl, VITE_DEMO_MAILBOX_URL: `${webUrl}/?mode=demo#/demo/mailbox` }),
       ),
     );
 

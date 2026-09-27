@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { formatUnits } from "viem";
+import { MODE } from "./mode";
 
 export const usdc = (units: string | bigint) => `${Number(formatUnits(BigInt(units), 6)).toLocaleString("en-US", { maximumFractionDigits: 6 })} USDC`;
 const CHAINS: Record<number, string> = { 42161: "Arbitrum One", 421614: "Arbitrum Sepolia (testnet)", 31337: "local chain (anvil)" };
-export const chainName = (id: number) => CHAINS[id] ?? `chain ${id}`;
+export const chainName = (id: number) => (MODE === "demo" ? "Demo network" : CHAINS[id] ?? `chain ${id}`);
 export const short = (a?: string | null) => (a ? `${a.slice(0, 6)}…${a.slice(-4)}` : "—");
 export const date = (s: string) => new Date(s).toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric" });
 export const dateTime = (s: string) => new Date(s).toLocaleString("en-US", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });

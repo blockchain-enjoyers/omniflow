@@ -1,11 +1,11 @@
 import type { Hex } from "viem";
 
-const API = (import.meta.env.VITE_API_URL ?? "http://localhost:3001").replace(/\/$/, "");
+import { apiBase } from "./mode";
 
 export type Headers = () => Promise<Record<string, string>>;
 
 export async function call<T>(headers: Headers | null, method: string, path: string, body?: unknown): Promise<T> {
-  const r = await fetch(`${API}${path}`, {
+  const r = await fetch(`${apiBase()}${path}`, {
     method,
     headers: { "content-type": "application/json", ...(headers ? await headers() : {}) },
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -21,7 +21,7 @@ export async function call<T>(headers: Headers | null, method: string, path: str
   return j as T;
 }
 
-export const apiUrl = API;
+export const apiUrl = apiBase;
 
 export interface Me {
   user: { did: string; email: string | null; wallet: string | null };

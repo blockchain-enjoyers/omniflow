@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { formatUnits, isAddress, type Address, type EIP1193Provider } from "viem";
 import { DepositStatus, parseClaimLink, type ClaimLink } from "@omniflow/shared";
 import { LoginForm, useAuth } from "@omniflow/auth-client";
-import { DEFAULT_RPC, RELAYER_URL } from "./config";
+import { DEMO, DEMO_MAILBOX_URL, defaultRpc, RELAYER_URL } from "./config";
 import { claimViaRelayer, claimWithOwnWallet, readDeposit, type DepositView } from "./claim";
 
 // window.ethereum is typed `any` by the Privy SDK's globals; narrow it here.
@@ -18,7 +18,7 @@ export function App({ withLogin }: { withLogin: boolean }) {
       return e as Error;
     }
   }, []);
-  const [rpc, setRpc] = useState(() => (link instanceof Error ? "" : (DEFAULT_RPC[link.chainId] ?? "")));
+  const [rpc, setRpc] = useState(() => (link instanceof Error ? "" : defaultRpc(link.chainId)));
   const [deposit, setDeposit] = useState<DepositView | null>(null);
   const [readError, setReadError] = useState<string | null>(null);
   const [address, setAddress] = useState("");
@@ -120,12 +120,13 @@ export function App({ withLogin }: { withLogin: boolean }) {
   );
 }
 
-const chainLabel = (id: number) => ({ 42161: "Arbitrum One", 421614: "Arbitrum Sepolia", 31337: "local chain (anvil)" })[id] ?? String(id);
+const chainLabel = (id: number) => (DEMO ? "the demo network" : ({ 42161: "Arbitrum One", 421614: "Arbitrum Sepolia" })[id] ?? `chain ${id}`);
 
 function Frame({ children }: { children: ReactNode }) {
   return (
     <div className="claim-page">
-      <div className="brand"><span className="logo">O</span> Omniflow</div>
+      <div className="brand"><span className="logo">O</span> Omniflow{DEMO && <span className="badge warn" data-testid="demo-badge">Demo mode</span>}</div>
+      {DEMO && <div className="callout warn" data-testid="demo-banner">Demo mode — this is test money on a demo network, not a real payment.</div>}
       <main className="claim-main">{children}</main>
       <p className="small muted" style={{ textAlign: "center" }}>Non-custodial payouts: the money stays in a contract until you claim it.</p>
     </div>
@@ -143,6 +144,7 @@ function EmbeddedClaim({ busy, onClaim }: { busy: boolean; onClaim: (wallet: Add
         <>
           <p className="hint" style={{ marginTop: 4 }}>Sign in with your email — a wallet is created for you, nothing to install.</p>
           <LoginForm />
+          {DEMO_MAILBOX_URL && <p className="hint small" style={{ marginTop: 8, marginBottom: 0 }}><a href={DEMO_MAILBOX_URL} target="_blank" rel="noreferrer">Open the demo mailbox</a> to read the code.</p>}
         </>
       ) : !auth.user.wallet ? (
         <p className="hint">Your wallet is still being created — refresh in a few seconds.</p>

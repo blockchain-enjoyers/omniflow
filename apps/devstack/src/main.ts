@@ -26,9 +26,9 @@ if (process.env.SEED !== "0") {
 console.log(`
 Omniflow — everything is emulated (Privy, ZeroDev, mail, on-ramp, chain). Not Privy, not ZeroDev, not mainnet.
 
-  dashboard          ${stack.urls.web}
+  dashboard          ${stack.urls.web}   (choose "Demo"; "Real" needs VITE_API_URL + VITE_PRIVY_APP_ID)
   claim page         ${stack.urls.claim}
-  dev mailbox        ${stack.urls.web}/#/dev/mailbox   ← login codes and every email
+  demo mailbox       ${stack.urls.web}/?mode=demo#/demo/mailbox   ← sign-in codes and every email
   API                ${stack.urls.api}
   Privy emulator     ${stack.urls.privy}
   on-ramp emulator   ${stack.urls.onramp}

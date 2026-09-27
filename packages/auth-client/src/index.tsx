@@ -54,7 +54,7 @@ export function AuthProvider({ config, children }: { config: AuthConfig; childre
     );
   }
   if (config.emulatorUrl) return <EmulatorAuth url={config.emulatorUrl} confirm={config.confirm}>{children}</EmulatorAuth>;
-  throw new Error("configure VITE_PRIVY_APP_ID (real Privy) or VITE_PRIVY_EMULATOR_URL (emulator)");
+  throw new Error("auth is not configured: neither a Privy app id nor a demo sign-in service");
 }
 
 // ------------------------------------------------------------------ real Privy (typed from SDK 3.45.0, untested live)
@@ -203,7 +203,7 @@ export function LoginForm({ title, subtitle }: { title?: string; subtitle?: stri
           <div className="actions"><button className="block" type="submit" data-testid="login-verify" disabled={busy || !code}>Sign in</button></div>
         </form>
       )}
-      {auth.mode === "emulator" && <div className="callout emu" style={{ marginTop: 16, marginBottom: 0 }}>Privy emulator sign-in — the code arrives in the dev mailbox.</div>}
+      {auth.mode === "emulator" && <p className="hint" style={{ marginTop: 12, marginBottom: 0 }}>Demo mode: your code arrives in the demo mailbox.</p>}
       {err && <p className="error">{err}</p>}
     </div>
   );
