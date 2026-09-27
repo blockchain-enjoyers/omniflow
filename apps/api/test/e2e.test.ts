@@ -10,7 +10,9 @@ import { ClaimKeyVault } from "../src/claimkeys/vault.js";
 import { MemoryMailer } from "../src/mail/mailer.js";
 import { PayoutService } from "../src/payouts/service.js";
 import { createApp } from "../src/http/app.js";
-import { increaseTime, startLocalStack, SUBMITTER_KEY, type LocalStack } from "./helpers.js";
+import { FORK, increaseTime, startLocalStack, SUBMITTER_KEY, type LocalStack } from "./helpers.js";
+
+const CHAIN = FORK ? 421614 : 31337;
 
 /**
  * The approved slice, end to end on a local chain (no network): organisation 2-of-3 → CSV → review →
@@ -42,7 +44,7 @@ describe.skipIf(!DB_URL)("slice e2e", () => {
     db = createDb(DB_URL!);
     await db.query("DROP SCHEMA public CASCADE; CREATE SCHEMA public;");
     await migrate(db);
-    chain = new ChainClient({ chainId: 31337, rpcUrl: stack.rpcUrl, entryPoint: stack.entryPoint, submitterKey: SUBMITTER_KEY });
+    chain = new ChainClient({ chainId: CHAIN, rpcUrl: stack.rpcUrl, entryPoint: stack.entryPoint, submitterKey: SUBMITTER_KEY });
     mailer = new MemoryMailer();
     service = new PayoutService(db, chain, new ClaimKeyVault(randomBytes(32).toString("hex")), mailer, {
       tokenDecimals: 6,
@@ -114,10 +116,10 @@ describe.skipIf(!DB_URL)("slice e2e", () => {
   it("creates a payout from CSV and shows the review summary", async () => {
     const csv = [
       "name,email,address,chain_id,amount",
-      `Alice,,${alice},31337,1000`,
-      `Bob,bob@example.test,${bob},31337,2000.5`,
-      "Carol,carol@example.test,,31337,3000",
-      "Dave,,,31337,10",
+      `Alice,,${alice},${CHAIN},1000`,
+      `Bob,bob@example.test,${bob},${CHAIN},2000.5`,
+      `Carol,carol@example.test,,${CHAIN},3000`,
+      `Dave,,,${CHAIN},10`,
       `Eve,,${alice},1,5`,
     ].join("\n");
     const p = await http_.post(`/orgs/${orgId}/payouts`).set(dev).send({ title: "September grants", csv }).expect(201);
@@ -181,10 +183,11 @@ describe.skipIf(!DB_URL)("slice e2e", () => {
     const wallet = privateKeyToAccount(generatePrivateKey()).address;
     const deadline = BigInt(Math.floor(Date.now() / 1000) + 3600);
     const signature = await signClaim(link, wallet, deadline);
+    const relayerBefore = await balance(chain.submitter); // on a fork the public anvil account may already hold USDC
     const r = await http_.post("/claims").send({ escrow: link.escrow, depositId: link.depositId, recipient: wallet, deadline: deadline.toString(), signature }).expect(201);
     expect(r.body.ok).toBe(true);
     expect(await balance(wallet)).toBe(3_000_000_000n);
-    expect(await balance(chain.submitter)).toBe(50_000n);
+    expect((await balance(chain.submitter)) - relayerBefore).toBe(50_000n);
 
     // the same link again: rejected by simulation, no transaction sent
     const nonceBefore = await chain.pub.getTransactionCount({ address: chain.submitter });
@@ -197,7 +200,7 @@ describe.skipIf(!DB_URL)("slice e2e", () => {
   });
 
   it("claim works without Omniflow: straight to the escrow with any RPC", async () => {
-    const p = await http_.post(`/orgs/${orgId}/payouts`).set(dev).send({ title: "solo", csv: "name,email,address,chain_id,amount\nZed,zed@example.test,,31337,7" }).expect(201);
+    const p = await http_.post(`/orgs/${orgId}/payouts`).set(dev).send({ title: "solo", csv: `name,email,address,chain_id,amount\nZed,zed@example.test,,${CHAIN},7` }).expect(201);
     const b = await http_.post(`/payouts/${p.body.id}/batches`).set(dev).expect(201);
     await approveAndSubmit(b.body.id, [2, 0]);
     const link = parseClaimLink(mailer.sent.at(-1)!.text.match(/http:\/\/claim\.local\/#\S+/)![0]);
@@ -208,7 +211,7 @@ describe.skipIf(!DB_URL)("slice e2e", () => {
     const deadline = BigInt(Math.floor(Date.now() / 1000) + 3600);
     const sig = await signClaim(link, self.address, deadline);
     const { createWalletClient } = await import("viem");
-    const w = createWalletClient({ account: self, transport: http(stack.rpcUrl), chain: { id: 31337, name: "anvil", nativeCurrency: { name: "E", symbol: "E", decimals: 18 }, rpcUrls: { default: { http: [stack.rpcUrl] } } } });
+    const w = createWalletClient({ account: self, transport: http(stack.rpcUrl), chain: { id: CHAIN, name: "anvil", nativeCurrency: { name: "E", symbol: "E", decimals: 18 }, rpcUrls: { default: { http: [stack.rpcUrl] } } } });
     const h = await w.writeContract({ address: link.escrow, abi: claimEscrowAbi, functionName: "claim", args: [link.depositId, self.address, deadline, sig] });
     expect((await pub.waitForTransactionReceipt({ hash: h })).status).toBe("success");
     const d = await pub.readContract({ address: link.escrow, abi: claimEscrowAbi, functionName: "getDeposit", args: [link.depositId] });
@@ -216,7 +219,7 @@ describe.skipIf(!DB_URL)("slice e2e", () => {
   });
 
   it("revoke needs the same 2 of 3 and returns money to the account", async () => {
-    const p = await http_.post(`/orgs/${orgId}/payouts`).set(dev).send({ title: "to revoke", csv: "name,email,address,chain_id,amount\nYan,yan@example.test,,31337,11" }).expect(201);
+    const p = await http_.post(`/orgs/${orgId}/payouts`).set(dev).send({ title: "to revoke", csv: `name,email,address,chain_id,amount\nYan,yan@example.test,,${CHAIN},11` }).expect(201);
     const b = await http_.post(`/payouts/${p.body.id}/batches`).set(dev).expect(201);
     await approveAndSubmit(b.body.id);
     const before = await balance(stack.account);
@@ -230,7 +233,7 @@ describe.skipIf(!DB_URL)("slice e2e", () => {
   });
 
   it("auto-refund by the keeper after N days goes to the depositor only", async () => {
-    const p = await http_.post(`/orgs/${orgId}/payouts`).set(dev).send({ title: "expiring", csv: "name,email,address,chain_id,amount\nXia,xia@example.test,,31337,13", autoRefundDays: 1 }).expect(201);
+    const p = await http_.post(`/orgs/${orgId}/payouts`).set(dev).send({ title: "expiring", csv: `name,email,address,chain_id,amount\nXia,xia@example.test,,${CHAIN},13`, autoRefundDays: 1 }).expect(201);
     const b = await http_.post(`/payouts/${p.body.id}/batches`).set(dev).expect(201);
     await approveAndSubmit(b.body.id);
     const before = await balance(stack.account);

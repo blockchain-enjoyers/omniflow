@@ -13,7 +13,9 @@ import { ClaimKeyVault } from "../../api/src/claimkeys/vault.js";
 import { MemoryMailer } from "../../api/src/mail/mailer.js";
 import { PayoutService } from "../../api/src/payouts/service.js";
 import { createApp } from "../../api/src/http/app.js";
-import { startLocalStack, SUBMITTER_KEY, type LocalStack } from "../../api/test/helpers.js";
+import { FORK, startLocalStack, SUBMITTER_KEY, type LocalStack } from "../../api/test/helpers.js";
+
+const CHAIN = FORK ? 421614 : 31337;
 
 /** The approved slice through the UI: operator → review → two approvers sign in the cabinet → receipt. */
 const DB_URL = process.env.TEST_DATABASE_URL;
@@ -39,7 +41,7 @@ describe.skipIf(!DB_URL)("slice through the cabinet UI", () => {
     db = createDb(DB_URL!);
     await db.query("DROP SCHEMA public CASCADE; CREATE SCHEMA public;");
     await migrate(db);
-    const chain = new ChainClient({ chainId: 31337, rpcUrl: stack.rpcUrl, entryPoint: stack.entryPoint, submitterKey: SUBMITTER_KEY });
+    const chain = new ChainClient({ chainId: CHAIN, rpcUrl: stack.rpcUrl, entryPoint: stack.entryPoint, submitterKey: SUBMITTER_KEY });
     service = new PayoutService(db, chain, new ClaimKeyVault(randomBytes(32).toString("hex")), new MemoryMailer(), {
       tokenDecimals: 6, claimTip: 50_000n, maxRowsPerBatch: 40, claimBaseUrl: "http://claim.local/", senderDisplayName: (n) => n,
     });
@@ -82,7 +84,7 @@ describe.skipIf(!DB_URL)("slice through the cabinet UI", () => {
     await op.goto(`http://127.0.0.1:${port}/`);
     await op.getByTestId("org").fill(orgId);
     await op.getByTestId("title").fill("October");
-    await op.getByTestId("csv").fill(`name,email,address,chain_id,amount\nAlice,,${alice},31337,1000\nNobody,,,31337,5`);
+    await op.getByTestId("csv").fill(`name,email,address,chain_id,amount\nAlice,,${alice},${CHAIN},1000\nNobody,,,${CHAIN},5`);
     await op.getByTestId("create").click();
     const review = op.getByTestId("review");
     await review.waitFor();

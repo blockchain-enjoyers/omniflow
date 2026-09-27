@@ -2,7 +2,7 @@ import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { readFileSync, mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createTestClient, http, type Address, type Hex } from "viem";
+import { createPublicClient, createTestClient, encodeFunctionData, http, parseAbi, type Address, type Hex } from "viem";
 import { mnemonicToAccount } from "viem/accounts";
 import { foundry } from "viem/chains";
 
@@ -30,10 +30,15 @@ export interface LocalStack {
   factory: Address;
 }
 
+/** STACK=fork → an anvil fork of Arbitrum Sepolia with the deployed Kernel 0.3.1, validator and Circle USDC. */
+export const FORK = process.env.STACK === "fork";
+const FORK_URL = process.env.FORK_URL ?? "https://sepolia-rollup.arbitrum.io/rpc";
+
 export async function startLocalStack(approvers: Address[], threshold: number): Promise<LocalStack> {
   const port = 8600 + Math.floor(Math.random() * 300);
   const rpcUrl = `http://127.0.0.1:${port}`;
-  const anvil = spawn(`${FOUNDRY_BIN}/anvil`, ["--port", String(port), "--silent", "--disable-code-size-limit"], { stdio: "ignore" });
+  const args = FORK ? ["--fork-url", FORK_URL] : ["--disable-code-size-limit"];
+  const anvil = spawn(`${FOUNDRY_BIN}/anvil`, ["--port", String(port), "--silent", ...args], { stdio: "ignore" });
   for (let i = 0; i < 50; i++) {
     try {
       await fetch(rpcUrl, { method: "POST", headers: { "content-type": "application/json" }, body: '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}' });
@@ -46,11 +51,49 @@ export async function startLocalStack(approvers: Address[], threshold: number): 
   const out = `deployments/e2e-${port}.json`;
   execFileSync(
     `${FOUNDRY_BIN}/forge`,
-    ["script", "script/LocalStack.s.sol", "--rpc-url", rpcUrl, "--private-key", DEPLOYER_KEY, "--broadcast", "--disable-code-size-limit", "--offline", "--non-interactive", "-q"],
+    ["script", FORK ? "script/ForkStack.s.sol" : "script/LocalStack.s.sol", "--rpc-url", rpcUrl, "--private-key", DEPLOYER_KEY, "--broadcast", "--disable-code-size-limit", "--offline", "--non-interactive", "-q"],
     { cwd: CONTRACTS, env: { ...process.env, APPROVERS: approvers.join(","), THRESHOLD: String(threshold), OUT: out }, stdio: "pipe" },
   );
   const d = JSON.parse(readFileSync(resolve(CONTRACTS, out), "utf8"));
-  return { rpcUrl, anvil, ...d };
+  const stack = { rpcUrl, anvil, ...d } as LocalStack;
+  if (FORK) {
+    await rpc(rpcUrl, "anvil_setBalance", [stack.account, "0x8AC7230489E80000"]); // 10 ETH gas prefund (no paymaster)
+    await mintToken(stack, stack.account, 1_000_000_000_000n);
+  }
+  return stack;
+}
+
+async function rpc(url: string, method: string, params: unknown[]) {
+  const r = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) });
+  const j = await r.json();
+  if (j.error) throw new Error(`${method}: ${j.error.message}`);
+  return j.result;
+}
+
+/**
+ * Credits test tokens. Local stack: MockUSDC.mint. Fork: Circle's own path on the FORK only —
+ * impersonate masterMinter, configure a minter, mint. Nothing touches the live network.
+ */
+export async function mintToken(stack: LocalStack, to: Address, amount: bigint) {
+  const pub = createPublicClient({ transport: http(stack.rpcUrl) });
+  const mintAbi = parseAbi(["function mint(address to, uint256 amount) returns (bool)", "function masterMinter() view returns (address)", "function configureMinter(address minter, uint256 allowance) returns (bool)"]);
+  const send = async (from: Address, data: Hex) => {
+    const hash = await rpc(stack.rpcUrl, "eth_sendTransaction", [{ from, to: stack.token, data }]);
+    await pub.waitForTransactionReceipt({ hash });
+  };
+  if (!FORK) {
+    const deployer = mnemonicToAccount(ANVIL_MNEMONIC, { addressIndex: 0 }).address;
+    await rpc(stack.rpcUrl, "anvil_impersonateAccount", [deployer]);
+    return send(deployer, encodeFunctionData({ abi: mintAbi, functionName: "mint", args: [to, amount] }));
+  }
+  const master = await pub.readContract({ address: stack.token, abi: mintAbi, functionName: "masterMinter" });
+  const minter = "0x00000000000000000000000000000000000da0da" as Address;
+  for (const a of [master, minter]) {
+    await rpc(stack.rpcUrl, "anvil_setBalance", [a, "0x56BC75E2D63100000"]);
+    await rpc(stack.rpcUrl, "anvil_impersonateAccount", [a]);
+  }
+  await send(master, encodeFunctionData({ abi: mintAbi, functionName: "configureMinter", args: [minter, amount] }));
+  await send(minter, encodeFunctionData({ abi: mintAbi, functionName: "mint", args: [to, amount] }));
 }
 
 export async function increaseTime(rpcUrl: string, seconds: number) {

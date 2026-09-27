@@ -82,7 +82,11 @@ export class PayoutService {
       const w = onChain.weights.find((x) => x.address === a.address)?.weight ?? 0;
       if (w !== a.weight) throw new HttpError(400, `approver ${a.address}: weight ${a.weight} differs from chain (${w})`);
     }
+    // Start indexing from now, not from genesis: the escrow has no events for this org before registration,
+    // and a from-0 log scan on a live chain is an unbounded RPC request.
+    const head = await this.chain.blockNumber();
     return tx(this.db, async (c) => {
+      await c.query(`INSERT INTO indexer_cursor (chain_id, last_block) VALUES ($1,$2) ON CONFLICT DO NOTHING`, [this.chain.cfg.chainId, head.toString()]);
       const { rows } = await c.query(
         `INSERT INTO orgs (name, chain_id, account, validator, escrow, token, threshold, auto_refund_days)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
