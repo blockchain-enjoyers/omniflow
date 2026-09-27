@@ -16,6 +16,7 @@ import {
 import { privateKeyToAccount } from "viem/accounts";
 import { entryPoint07Abi } from "viem/account-abstraction";
 import { claimEscrowAbi, kernelAbi, kernelFactoryAbi } from "@omniflow/shared";
+import { BundlerClient, u128 } from "./bundler.js";
 
 /** ERC-4337 v0.7 packed user operation, as EntryPoint.handleOps takes it. */
 export interface PackedOp {
@@ -44,6 +45,10 @@ export interface ChainConfig {
    * funds — it only relays operations already signed by approvers or by a claim key.
    */
   submitterKey: Hex;
+  /**
+   * Hosted bundler (ZeroDev). Without it the API bundles itself: the submitter calls EntryPoint.handleOps.
+   */
+  bundlerUrl?: string;
 }
 
 export interface OpReceipt {
@@ -55,14 +60,28 @@ export interface OpReceipt {
   logs: Log[];
 }
 
-const u128 = (hi: bigint, lo: bigint): Hex => `0x${((hi << 128n) | lo).toString(16).padStart(64, "0")}`;
+/**
+ * Minimum callGasLimit for a batch of `executions` calls. Batches run in TRY mode, so a callGasLimit that is
+ * too low does not fail the operation — the last items silently fail. A bundler estimate cannot see that (found on
+ * the Arbitrum Sepolia fork 27.09: Alto estimated 228 725 for four calls on Circle USDC; the escrow deposit failed).
+ * The floor is what the end-to-end tests execute with, locally and on the fork.
+ */
+export const minCallGas = (executions: number) => 100_000n + 120_000n * BigInt(executions);
+
+/** Where to find a submitted op: the bundle transaction (self-bundling) or only the userOpHash (hosted bundler). */
+export interface SubmittedOp {
+  userOpHash: Hex;
+  txHash: Hex | null;
+}
 
 export class ChainClient {
   readonly pub: PublicClient;
   private readonly wallet: WalletClient;
   readonly submitter: Address;
+  readonly bundler?: BundlerClient;
 
   constructor(readonly cfg: ChainConfig) {
+    if (cfg.bundlerUrl) this.bundler = new BundlerClient(cfg.bundlerUrl, cfg.entryPoint);
     const chain = { id: cfg.chainId, name: `chain-${cfg.chainId}`, nativeCurrency: { name: "ETH", symbol: "ETH", decimals: 18 }, rpcUrls: { default: { http: [cfg.rpcUrl] } } } as Chain;
     const account = privateKeyToAccount(cfg.submitterKey);
     this.submitter = account.address;
@@ -100,12 +119,17 @@ export class ChainClient {
     return { threshold: Number(threshold), weights: candidates.map((g, i) => ({ address: g, weight: Number(weights[i]![0]) })) };
   }
 
-  /** Builds the op the final approver signs. Gas limits scale with the number of executions. */
+  /**
+   * Builds the op the final approver signs. Gas limits scale with the number of executions; a sponsor or the bundler
+   * replaces them with its own estimate. Fees: the bundler's suggestion when it offers one, else 1.5 × node gas price.
+   */
   async draftOp(sender: Address, callData: Hex, nonce: bigint, executions: number): Promise<PackedOp> {
-    const gasPrice = await this.pub.getGasPrice();
-    const maxFee = (gasPrice * 3n) / 2n + 1n;
+    const suggested = await this.bundler?.gasPrice();
+    const node = suggested ? 0n : await this.pub.getGasPrice();
+    const maxFee = suggested?.maxFeePerGas ?? (node * 3n) / 2n + 1n;
+    const maxPriority = suggested?.maxPriorityFeePerGas ?? maxFee;
     const verification = 400_000n;
-    const call = 100_000n + 120_000n * BigInt(executions);
+    const call = minCallGas(executions);
     return {
       sender,
       nonce,
@@ -113,7 +137,7 @@ export class ChainClient {
       callData,
       accountGasLimits: u128(verification, call),
       preVerificationGas: 100_000n,
-      gasFees: u128(maxFee, maxFee),
+      gasFees: u128(maxPriority, maxFee),
       paymasterAndData: "0x",
       signature: "0x",
     };
@@ -123,9 +147,10 @@ export class ChainClient {
     return this.pub.readContract({ address: this.cfg.entryPoint, abi: entryPoint07Abi, functionName: "getUserOpHash", args: [op] });
   }
 
-  /** Relays a fully signed op straight to EntryPoint (self-bundling, without a hosted bundler). */
-  async submitOp(op: PackedOp): Promise<Hex> {
-    return this.wallet.writeContract({
+  /** Sends a fully signed op: to the hosted bundler, or straight to EntryPoint (self-bundling). */
+  async submitOp(op: PackedOp): Promise<SubmittedOp> {
+    if (this.bundler) return { userOpHash: await this.bundler.send(op), txHash: null };
+    const txHash = await this.wallet.writeContract({
       address: this.cfg.entryPoint,
       abi: entryPoint07Abi,
       functionName: "handleOps",
@@ -133,9 +158,15 @@ export class ChainClient {
       chain: this.wallet.chain,
       account: this.wallet.account!,
     });
+    return { userOpHash: await this.getUserOpHash(op), txHash };
   }
 
-  async waitOp(txHash: Hex, account: Address): Promise<OpReceipt> {
+  /**
+   * Result of a submitted op. A bundle may carry other people's operations, so only this op's UserOperationEvent
+   * counts, and only the account's own TryExecuteUnsuccessful events.
+   */
+  async waitOp(ref: SubmittedOp, account: Address): Promise<OpReceipt> {
+    const txHash = ref.txHash ?? (await this.bundler!.waitReceipt(ref.userOpHash)).receipt.transactionHash;
     const r: TransactionReceipt = await this.pub.waitForTransactionReceipt({ hash: txHash });
     let success = false;
     const failedExecutions: number[] = [];
@@ -143,7 +174,7 @@ export class ChainClient {
       if (getAddress(log.address) === getAddress(this.cfg.entryPoint)) {
         try {
           const ev = decodeEventLog({ abi: entryPoint07Abi, data: log.data, topics: log.topics });
-          if (ev.eventName === "UserOperationEvent") success = ev.args.success;
+          if (ev.eventName === "UserOperationEvent" && ev.args.userOpHash === ref.userOpHash) success = ev.args.success;
         } catch {}
       } else if (getAddress(log.address) === getAddress(account)) {
         try {

@@ -59,7 +59,7 @@ describe.skipIf(!DB_URL)("the application through the browser", () => {
   }
 
   beforeAll(async () => {
-    const zero = { anvil: 0, api: 0, privy: 0, onramp: 0, web: 0, claim: 0 };
+    const zero = { anvil: 0, api: 0, privy: 0, onramp: 0, web: 0, claim: 0, bundler: 0, zerodev: 0 };
     stack = await startStack({ databaseUrl: DB_URL!, fork: process.env.STACK === "fork", forkUrl: process.env.FORK_URL, host: "127.0.0.1", ports: zero, tickMs: 1000 });
     browser = await chromium.launch({ executablePath: CHROMIUM });
   });

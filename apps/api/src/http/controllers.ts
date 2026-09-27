@@ -255,7 +255,7 @@ export class ApproverController {
   async final(@Req() r: Rq, @Param("id") id: string, @Body() b: { signature: Hex }) {
     const { org, wallet } = await this.me(r, id);
     const res = await this.s.submitFinal(id, b.signature, wallet);
-    await this.orgs.audit(org, r.user.did, "batch.submitted", { batchId: id, txHash: res.txHash });
+    await this.orgs.audit(org, r.user.did, "batch.submitted", { batchId: id, userOpHash: res.userOpHash, txHash: res.txHash });
     void this.s.settleBatch(id).catch((e) => console.error("settle", e));
     return res;
   }

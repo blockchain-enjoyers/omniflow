@@ -7,7 +7,7 @@ import { PayoutService } from "./payouts/service.js";
 import { FormService } from "./payouts/forms.js";
 import { OrgService } from "./orgs/service.js";
 import { PrivyVerifier } from "./auth/privy.js";
-import { Erc7677Paymaster, LocalVerifyingPaymaster } from "./chain/paymaster.js";
+import { Erc7677Paymaster, LocalVerifyingPaymaster, ZeroDevPaymaster } from "./chain/paymaster.js";
 import { createApp } from "./http/app.js";
 import { ensureDevMailbox } from "@omniflow/devmail";
 import { ListService } from "./payouts/lists.js";
@@ -18,7 +18,8 @@ import { EmulatedOnramp, type OnrampProvider } from "./onramp/onramp.js";
 export interface ComposeConfig {
   databaseUrl?: string;
   db?: Db;
-  chain: { chainId: number; rpcUrl: string; entryPoint: Address; submitterKey: Hex };
+  /** bundlerUrl: hosted bundler (ZeroDev's project RPC); omitted = the API calls handleOps itself */
+  chain: { chainId: number; rpcUrl: string; entryPoint: Address; submitterKey: Hex; bundlerUrl?: string };
   deployment: { factory: Address; validator: Address; escrow: Address; token: Address };
   privy: { emulatorUrl: string } | { verificationKeyPem: string; appId: string } | { verifier: PrivyVerifier };
   claimKeyEncryptionKey: string;
@@ -27,8 +28,11 @@ export interface ComposeConfig {
   claimTip?: bigint;
   maxRowsPerBatch?: number;
   mailer?: Mailer;
-  /** emulated local VerifyingPaymaster, or a hosted ERC-7677 paymaster; none = the account pays gas in ETH */
-  paymaster?: { local: { address: Address; signerKey: Hex } } | { erc7677: { url: string; context?: unknown } };
+  /**
+   * ZeroDev — zd_sponsorUserOperation on the project RPC; the emulated local VerifyingPaymaster;
+   * or any ERC-7677 paymaster. None = the account pays gas in ETH.
+   */
+  paymaster?: { zerodev: { url: string } } | { local: { address: Address; signerKey: Hex } } | { erc7677: { url: string; context?: unknown } };
   devEndpoints?: boolean;
   /** partner not chosen — the emulator, or nothing */
   onramp?: { emulatorUrl: string } | OnrampProvider;
@@ -42,9 +46,11 @@ export async function compose(cfg: ComposeConfig) {
   const mailer = cfg.mailer ?? new DevMailboxMailer(db);
   const sponsor = !cfg.paymaster
     ? undefined
-    : "local" in cfg.paymaster
-      ? new LocalVerifyingPaymaster(chain, cfg.paymaster.local.address, cfg.paymaster.local.signerKey)
-      : new Erc7677Paymaster(cfg.paymaster.erc7677.url, cfg.chain.entryPoint, cfg.chain.chainId, cfg.paymaster.erc7677.context);
+    : "zerodev" in cfg.paymaster
+      ? new ZeroDevPaymaster(cfg.paymaster.zerodev.url, cfg.chain.entryPoint, cfg.chain.chainId)
+      : "local" in cfg.paymaster
+        ? new LocalVerifyingPaymaster(chain, cfg.paymaster.local.address, cfg.paymaster.local.signerKey)
+        : new Erc7677Paymaster(cfg.paymaster.erc7677.url, cfg.chain.entryPoint, cfg.chain.chainId, cfg.paymaster.erc7677.context);
   const payouts = new PayoutService(db, chain, new ClaimKeyVault(cfg.claimKeyEncryptionKey), mailer, {
     tokenDecimals: cfg.tokenDecimals ?? 6,
     claimTip: cfg.claimTip ?? 50_000n,

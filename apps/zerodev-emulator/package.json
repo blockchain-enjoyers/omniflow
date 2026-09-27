@@ -1,0 +1,11 @@
+{
+  "name": "@omniflow/zerodev-emulator",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/emulator.ts",
+  "types": "src/emulator.ts",
+  "scripts": { "typecheck": "tsc --noEmit -p ." },
+  "dependencies": { "express": "5.2.1", "viem": "2.56.9" },
+  "devDependencies": { "@types/express": "5.0.6", "@types/node": "^22.0.0", "typescript": "^5.6.0" }
+}

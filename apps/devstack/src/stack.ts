@@ -6,7 +6,8 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import express from "express";
 import pg from "pg";
-import { PAYMASTER_SIGNER_KEY, startDevStack, SUBMITTER_KEY, type DevStack } from "@omniflow/devchain";
+import { PAYMASTER_SIGNER_KEY, startAlto, startDevStack, SUBMITTER_KEY, type DevStack } from "@omniflow/devchain";
+import { zerodevEmulator } from "@omniflow/zerodev-emulator";
 import { PrivyEmulator } from "@omniflow/privy-emulator";
 import { onrampEmulator } from "@omniflow/onramp-emulator";
 import { compose } from "../../api/src/compose.js";
@@ -26,7 +27,12 @@ export interface StackOptions {
   fork?: boolean;
   forkUrl?: string;
   /** 0 = pick a free port (tests) */
-  ports?: Partial<Record<"anvil" | "api" | "privy" | "onramp" | "web" | "claim", number>>;
+  ports?: Partial<Record<"anvil" | "api" | "privy" | "onramp" | "web" | "claim" | "bundler" | "zerodev", number>>;
+  /**
+   * "zerodev" (default): operations go the way they will in production — the ZeroDev EMULATOR's RPC in front of
+   * a real bundler (Alto) on anvil. "self": the API calls EntryPoint.handleOps itself, with the local paymaster.
+   */
+  aa?: "zerodev" | "self";
   host?: string;
   /** scheduler period: indexer, keeper, schedules */
   tickMs?: number;
@@ -38,7 +44,7 @@ export interface RunningStack {
   db: pg.Pool;
   emulator: PrivyEmulator;
   api: Awaited<ReturnType<typeof compose>>;
-  urls: { rpc: string; api: string; privy: string; onramp: string; web: string; claim: string };
+  urls: { rpc: string; api: string; privy: string; onramp: string; web: string; claim: string; zerodev: string | null };
   stop(): Promise<void>;
 }
 
@@ -80,8 +86,9 @@ function buildFrontend(app: "web" | "claim", env: Record<string, string>) {
 export async function startStack(o: StackOptions): Promise<RunningStack> {
   const log = o.log ?? (() => {});
   const host = o.host ?? "localhost";
-  const p = { anvil: 8545, api: 3001, privy: 3010, onramp: 3020, web: 5173, claim: 5174, ...o.ports };
+  const p = { anvil: 8545, api: 3001, privy: 3010, onramp: 3020, web: 5173, claim: 5174, bundler: 4337, zerodev: 3030, ...o.ports };
   const servers: Server[] = [];
+  const children: { kill(): void }[] = [];
 
   log(o.fork ? "anvil: форк Arbitrum Sepolia, развёртывание эскроу и paymaster…" : "anvil: локальная сеть, развёртывание стека из исходников…");
   const chain = await startDevStack({ fork: o.fork, forkUrl: o.forkUrl, port: p.anvil || undefined, contractsDir: CONTRACTS });
@@ -112,14 +119,26 @@ export async function startStack(o: StackOptions): Promise<RunningStack> {
     const onrampUrl = `http://${host}:${portOf(onSrv)}`;
     onApp.use(onrampEmulator({ publicUrl: onrampUrl, rpcUrl: chain.rpcUrl, token: chain.token, decimals: 6, feePercent: 1.75 }));
 
+    let zerodevUrl: string | null = null;
+    if ((o.aa ?? "zerodev") === "zerodev") {
+      log("бандлер Alto и эмулятор RPC ZeroDev…");
+      const alto = await startAlto(chain.rpcUrl, chain.entryPoint, { port: p.bundler || undefined });
+      children.push(alto.process);
+      const zdApp = express();
+      zdApp.use(zerodevEmulator({ bundlerUrl: alto.url, rpcUrl: chain.rpcUrl, paymaster: chain.paymaster, paymasterSignerKey: PAYMASTER_SIGNER_KEY }));
+      const zdSrv = await listen(zdApp, p.zerodev);
+      servers.push(zdSrv);
+      zerodevUrl = `http://${host}:${portOf(zdSrv)}`;
+    }
+
     const api = await compose({
       db,
-      chain: { chainId: chain.chainId, rpcUrl: chain.rpcUrl, entryPoint: chain.entryPoint, submitterKey: SUBMITTER_KEY },
+      chain: { chainId: chain.chainId, rpcUrl: chain.rpcUrl, entryPoint: chain.entryPoint, submitterKey: SUBMITTER_KEY, bundlerUrl: zerodevUrl ?? undefined },
       deployment: { factory: chain.factory, validator: chain.validator, escrow: chain.escrow, token: chain.token },
       privy: { verifier: await PrivyVerifier.fromPem(emulator.verificationKey(), "omniflow-dev") },
       claimKeyEncryptionKey: randomBytes(32).toString("hex"),
       urls: { app: `${webUrl}/`, claim: `${claimUrl}/`, form: `${webUrl}/` },
-      paymaster: { local: { address: chain.paymaster, signerKey: PAYMASTER_SIGNER_KEY } },
+      paymaster: zerodevUrl ? { zerodev: { url: zerodevUrl } } : { local: { address: chain.paymaster, signerKey: PAYMASTER_SIGNER_KEY } },
       onramp: { emulatorUrl: onrampUrl },
       devEndpoints: true,
     });
@@ -157,17 +176,19 @@ export async function startStack(o: StackOptions): Promise<RunningStack> {
       db,
       emulator,
       api,
-      urls: { rpc: chain.rpcUrl, api: apiUrl, privy: privyUrl, onramp: onrampUrl, web: webUrl, claim: claimUrl },
+      urls: { rpc: chain.rpcUrl, api: apiUrl, privy: privyUrl, onramp: onrampUrl, web: webUrl, claim: claimUrl, zerodev: zerodevUrl },
       async stop() {
         clearInterval(timer);
         await api.app.close();
         for (const s of servers) s.close();
+        for (const c of children) c.kill();
         await db.end();
         chain.anvil.kill();
       },
     };
   } catch (e) {
     for (const s of servers) s.close();
+    for (const c of children) c.kill();
     await db.end();
     chain.anvil.kill();
     throw e;

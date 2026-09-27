@@ -1,4 +1,5 @@
 import {
+  concatHex,
   getAddress,
   hashMessage,
   recoverAddress,
@@ -22,9 +23,14 @@ import {
 } from "@omniflow/shared";
 import { tx, type Db } from "../db/db.js";
 import type { ChainClient } from "../chain/chain.js";
-import { opFromJson, opToJson, type PackedOp } from "../chain/chain.js";
+import { minCallGas, opFromJson, opToJson, type PackedOp } from "../chain/chain.js";
 import type { ClaimKeyVault } from "../claimkeys/vault.js";
 import type { Sponsor } from "../chain/paymaster.js";
+import { withGas } from "../chain/bundler.js";
+
+/** Dummy last signature for simulation — the value @zerodev/weighted-ecdsa-validator 5.4.4 uses in getStubSignature. */
+const STUB_FINAL_SIGNATURE: Hex =
+  "0xfffffffffffffffffffffffffffffff0000000000000000000000000000000007aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1c";
 import type { Mailer } from "../mail/mailer.js";
 import { parsePayoutCsv } from "./csv.js";
 
@@ -291,9 +297,22 @@ export class PayoutService {
     }
     const m = manifestFromJson(batch.manifest);
     let op = await this.chain.draftOp(org.account, batch.call_data, BigInt(batch.nonce), batchExecutions(m).length);
-    // Omniflow pays gas when a paymaster is configured; paymasterAndData is part of userOpHash,
-    // so it must be final before the last approver signs.
+    // Simulation (sponsor, bundler estimate) needs a signature that passes validation: the real Approve signatures
+    // plus a dummy last one — what ZeroDev's WeightedECDSAValidator plugin does in getStubSignature.
+    op.signature = concatHex([...signed.filter((a) => a.kind === "approve").map((a) => a.signature as Hex), STUB_FINAL_SIGNATURE]);
+    // Omniflow pays gas when a paymaster is configured; paymasterAndData and the gas fields are part of
+    // userOpHash, so they must be final before the last approver signs.
+    const floor = minCallGas(batchExecutions(m).length);
     if (this.sponsor) op = await this.sponsor.sponsor(op);
+    else if (this.chain.bundler) {
+      const est = await this.chain.bundler.estimate(op);
+      op = withGas(op, { ...est, callGasLimit: BigInt(est.callGasLimit) > floor ? BigInt(est.callGasLimit) : floor });
+    }
+    // Fail closed: with TRY batches a low callGasLimit drops rows silently. The sponsor's signature covers the gas
+    // fields, so they cannot be raised afterwards — refuse to put such an op in front of an approver.
+    const callGas = BigInt(op.accountGasLimits) & ((1n << 128n) - 1n);
+    if (callGas < floor) throw new HttpError(502, `gas sponsor set callGasLimit ${callGas}, below the minimum ${floor} for ${batchExecutions(m).length} calls — not sending an operation that would execute partially`);
+    op.signature = "0x";
     const userOpHash = await this.chain.getUserOpHash(op);
     await this.db.query(`UPDATE batches SET final_op=$2, user_op_hash=$3 WHERE id=$1`, [batchId, opToJson(op), userOpHash]);
     return { step: "final" as const, userOpHash, manifest: batch.manifest };
@@ -331,9 +350,10 @@ export class PayoutService {
     const op: PackedOp = opFromJson(batch.final_op);
     op.signature = `0x${[...approvals.map((a) => a.signature), signature].map((s) => s.slice(2)).join("")}`;
     await this.db.query(`INSERT INTO approvals (batch_id, approver, kind, signature) VALUES ($1,$2,'final',$3) ON CONFLICT DO NOTHING`, [batchId, signer, signature]);
-    const txHash = await this.chain.submitOp(op);
-    await this.db.query(`UPDATE batches SET status='submitted', tx_hash=$2 WHERE id=$1`, [batchId, txHash]);
-    return { txHash };
+    // With a hosted bundler the transaction hash is known only after inclusion; settleBatch records it.
+    const sent = await this.chain.submitOp(op);
+    await this.db.query(`UPDATE batches SET status='submitted', tx_hash=$2 WHERE id=$1`, [batchId, sent.txHash]);
+    return sent;
   }
 
   // --------------------------------------------------------------- indexer
@@ -342,13 +362,13 @@ export class PayoutService {
   async settleBatch(batchId: string) {
     const { batch, org } = await this.batchCtx(batchId);
     if (batch.status !== "submitted") return;
-    const r = await this.chain.waitOp(batch.tx_hash, org.account);
+    const r = await this.chain.waitOp({ userOpHash: batch.user_op_hash as Hex, txHash: batch.tx_hash as Hex | null }, org.account);
     const m = manifestFromJson(batch.manifest);
     const idx = executionIndexToRow(m);
     const failedRows = new Set(r.failedExecutions.map((i) => idx[i]));
     await tx(this.db, async (c) => {
       if (!r.success) {
-        await c.query(`UPDATE batches SET status='failed' WHERE id=$1`, [batchId]);
+        await c.query(`UPDATE batches SET status='failed', tx_hash=$2 WHERE id=$1`, [batchId, r.txHash]);
         if (batch.kind === "pay") await c.query(`UPDATE payout_rows SET status='ready', batch_id=NULL WHERE batch_id=$1`, [batchId]);
         if (batch.kind === "rekey") {
           for (const fr of m.rows) await c.query(`UPDATE payout_rows SET rekey_pending=false WHERE payout_id=$1 AND row_key=$2`, [m.payoutId, fr.rowId]);
@@ -356,7 +376,7 @@ export class PayoutService {
         }
         return;
       }
-      await c.query(`UPDATE batches SET status='mined' WHERE id=$1`, [batchId]);
+      await c.query(`UPDATE batches SET status='mined', tx_hash=$2 WHERE id=$1`, [batchId, r.txHash]);
       for (const fr of m.rows) {
         if (fr.kind === "refund") continue; // applied from the Refunded event
         const failed = failedRows.has(fr.rowId);

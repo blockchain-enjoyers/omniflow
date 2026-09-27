@@ -1,6 +1,7 @@
 import { concatHex, encodeAbiParameters, numberToHex, pad, parseAbi, type Address, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import type { ChainClient, PackedOp } from "./chain.js";
+import { jsonRpc, paymasterAndData, toRpcUserOp, withGas } from "./bundler.js";
 
 /** Fills paymasterAndData so that Omniflow pays gas for an organisation's operation. */
 export interface Sponsor {
@@ -73,5 +74,27 @@ export class Erc7677Paymaster implements Sponsor {
         p.paymasterData,
       ]),
     };
+  }
+}
+
+/**
+ * ZeroDev paymaster: `zd_sponsorUserOperation` on the project RPC — the call and the response
+ * fields are taken from @zerodev/sdk 5.5.10 (`actions/paymaster/sponsorUserOperation.js`), level «vendor SDK code»;
+ * not yet executed against ZeroDev itself. The response also carries ZeroDev's own gas limits, so they replace ours.
+ * The op must carry a stub signature that passes validation in simulation — for WeightedECDSAValidator that is the
+ * real Approve signatures plus a dummy last one, as ZeroDev's own plugin does (`getStubSignature`).
+ */
+export class ZeroDevPaymaster implements Sponsor {
+  constructor(private readonly url: string, private readonly entryPoint: Address, private readonly chainId: number) {}
+
+  async sponsor(op: PackedOp): Promise<PackedOp> {
+    const r = await jsonRpc<{
+      callGasLimit: Hex; verificationGasLimit: Hex; preVerificationGas: Hex;
+      paymaster: Address; paymasterVerificationGasLimit: Hex; paymasterPostOpGasLimit: Hex; paymasterData: Hex;
+      maxFeePerGas?: Hex; maxPriorityFeePerGas?: Hex;
+    }>(this.url, "zd_sponsorUserOperation", [
+      { chainId: this.chainId, userOp: toRpcUserOp(op), entryPointAddress: this.entryPoint, shouldOverrideFee: false, shouldConsume: true },
+    ]);
+    return { ...withGas(op, r), paymasterAndData: paymasterAndData(r) };
   }
 }

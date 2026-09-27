@@ -14,7 +14,8 @@ import { compose } from "../src/compose.js";
 import { PrivyVerifier } from "../src/auth/privy.js";
 import type { ChainClient } from "../src/chain/chain.js";
 import type { PayoutService } from "../src/payouts/service.js";
-import { FORK, fundAccount, increaseTime, loginAs, PAYMASTER_SIGNER_KEY, startLocalStack, SUBMITTER_KEY, type LocalStack, type TestUser } from "./helpers.js";
+import { checkAccountValidation } from "./erc7562.js";
+import { FORK, fundAccount, HOSTED_AA, increaseTime, loginAs, PAYMASTER_SIGNER_KEY, startLocalStack, startZeroDevEmulator, SUBMITTER_KEY, type LocalStack, type TestUser } from "./helpers.js";
 
 /**
  * The whole sender side, end to end on a local chain (or a Sepolia fork with STACK=fork), with Privy EMULATED:
@@ -38,6 +39,7 @@ describe.skipIf(!DB_URL)("sender side e2e (emulated Privy)", () => {
   let a3: TestUser;
   let outsider: TestUser;
   let onrampServer: Server;
+  let zerodev: Awaited<ReturnType<typeof startZeroDevEmulator>> | undefined;
   let lists: Awaited<ReturnType<typeof compose>>["lists"];
   let orgId: string;
   let account: Address;
@@ -59,15 +61,16 @@ describe.skipIf(!DB_URL)("sender side e2e (emulated Privy)", () => {
     });
     const onUrl = `http://127.0.0.1:${(onrampServer.address() as { port: number }).port}`;
     onApp.use(onrampEmulator({ publicUrl: onUrl, rpcUrl: stack.rpcUrl, token: stack.token, decimals: 6, feePercent: 1.75 }));
+    if (HOSTED_AA) zerodev = await startZeroDevEmulator(stack);
     const c = await compose({
       db,
-      chain: { chainId: CHAIN, rpcUrl: stack.rpcUrl, entryPoint: stack.entryPoint, submitterKey: SUBMITTER_KEY },
+      chain: { chainId: CHAIN, rpcUrl: stack.rpcUrl, entryPoint: stack.entryPoint, submitterKey: SUBMITTER_KEY, bundlerUrl: zerodev?.url },
       deployment: { factory: stack.factory, validator: stack.validator, escrow: stack.escrow, token: stack.token },
       privy: { verifier: await PrivyVerifier.fromPem(emu.verificationKey(), "omniflow-test") },
       claimKeyEncryptionKey: randomBytes(32).toString("hex"),
       urls: { app: "http://app.local/", claim: "http://claim.local/", form: "http://app.local/" },
       devEndpoints: true,
-      paymaster: { local: { address: stack.paymaster, signerKey: PAYMASTER_SIGNER_KEY } },
+      paymaster: zerodev ? { zerodev: { url: zerodev.url } } : { local: { address: stack.paymaster, signerKey: PAYMASTER_SIGNER_KEY } },
       onramp: { emulatorUrl: onUrl },
     });
     ({ app, chain, payouts, lists } = c);
@@ -79,6 +82,7 @@ describe.skipIf(!DB_URL)("sender side e2e (emulated Privy)", () => {
 
   afterAll(async () => {
     onrampServer?.close();
+    zerodev?.stop();
     await app?.close();
     await db?.end();
     stack?.anvil.kill();
@@ -204,6 +208,17 @@ describe.skipIf(!DB_URL)("sender side e2e (emulated Privy)", () => {
     expect((await inbox(a3.email))[0]!.subject).toMatch(/с аккаунта ушло/);
     const bal = await api.get(`/orgs/${orgId}/balance`).set(ops.headers).expect(200);
     expect(bal.body.reservedInEscrow).toBe("3000000000"); // still the sender's money
+  });
+
+  it("ERC-7562: our side of validation (Kernel + WeightedECDSAValidator) keeps to the bundler storage and opcode rules", async () => {
+    const tx = (await db.query(`SELECT tx_hash FROM batches WHERE id=$1`, [batchId])).rows[0].tx_hash as Hex;
+    const report = await checkAccountValidation(stack.rpcUrl, tx, stack.entryPoint, account);
+    if (process.env.ERC7562_REPORT) console.log(JSON.stringify(report, null, 2));
+    expect(report.foreignAccesses.length).toBeGreaterThan(0); // the validator does read and write its own storage
+    expect(report.violations).toEqual([]);
+    // negative control: the same trace judged against another address must show violations
+    const control = await checkAccountValidation(stack.rpcUrl, tx, stack.entryPoint, account, alice);
+    expect(control.violations.length).toBe(report.foreignAccesses.length);
   });
 
   it("Carol claims by the emailed link into a fresh wallet", async () => {
@@ -394,5 +409,22 @@ describe.skipIf(!DB_URL)("sender side e2e (emulated Privy)", () => {
     const r = await api.get(`/payouts/${payoutId}/receipt`).set(ops.headers).expect(200);
     expect(r.body.payout.status).toBe("closed");
     expect(r.body.rows.filter((x: { executed: boolean }) => !x.executed).map((x: { name: string }) => x.name)).toEqual(["Eve"]);
+  });
+
+  it("fail closed: a sponsor that lowers callGasLimit below the floor gets no signature request (TRY batches)", async () => {
+    const p = await api.post(`/orgs/${orgId}/payouts`).set(ops.headers).send({ title: "low gas", csv: `name,email,address,chain_id,amount\nZoe,,${alice},${CHAIN},1` }).expect(201);
+    const b = (await api.post(`/payouts/${p.body.id}/batches`).set(ops.headers).expect(201)).body;
+    const s1 = await api.get(`/batches/${b.id}/next-step`).set(a1.headers).expect(200);
+    await api.post(`/batches/${b.id}/approvals`).set(a1.headers).send({ signature: await a1.signTypedData(s1.body.typedData) }).expect(201);
+    const svc = payouts as unknown as { sponsor?: { sponsor(op: { accountGasLimits: Hex }): Promise<unknown> } };
+    const real = svc.sponsor;
+    svc.sponsor = { sponsor: async (op) => ({ ...op, accountGasLimits: `0x${((400_000n << 128n) | 50_000n).toString(16).padStart(64, "0")}` }) };
+    try {
+      const r = await api.get(`/batches/${b.id}/next-step`).set(a2.headers).expect(502);
+      expect(r.body.error).toMatch(/below the minimum/);
+    } finally {
+      svc.sponsor = real;
+    }
+    expect((await api.get(`/batches/${b.id}/next-step`).set(a2.headers).expect(200)).body.step).toBe("final");
   });
 });

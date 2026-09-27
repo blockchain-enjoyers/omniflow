@@ -7,6 +7,7 @@ import { startStack } from "./stack.js";
  *   STACK=fork             anvil fork of Arbitrum Sepolia instead of a local chain from source
  *   FORK_URL               RPC for the fork (default: the public Arbitrum Sepolia RPC)
  *   SEED=0                 skip the demo organisation
+ *   AA=self                the API bundles itself (default: ZeroDev emulator in front of the Alto bundler)
  */
 const databaseUrl = process.env.DEVSTACK_DATABASE_URL ?? process.env.DATABASE_URL;
 if (!databaseUrl) {
@@ -14,7 +15,7 @@ if (!databaseUrl) {
   process.exit(1);
 }
 const log = (s: string) => console.log(`· ${s}`);
-const stack = await startStack({ databaseUrl, fork: process.env.STACK === "fork", forkUrl: process.env.FORK_URL, log });
+const stack = await startStack({ databaseUrl, fork: process.env.STACK === "fork", forkUrl: process.env.FORK_URL, aa: process.env.AA === "self" ? "self" : "zerodev", log });
 
 let demo: Awaited<ReturnType<typeof seedDemo>> | null = null;
 if (process.env.SEED !== "0") {
@@ -23,7 +24,7 @@ if (process.env.SEED !== "0") {
 }
 
 console.log(`
-Omniflow — всё эмулировано (Privy, почта, он-рамп, сеть). Не Privy, не мейннет.
+Omniflow — всё эмулировано (Privy, ZeroDev, почта, он-рамп, сеть). Не Privy, не ZeroDev, не мейннет.
 
   кабинет         ${stack.urls.web}
   страница клейма ${stack.urls.claim}
@@ -31,6 +32,7 @@ Omniflow — всё эмулировано (Privy, почта, он-рамп, с
   API             ${stack.urls.api}
   эмулятор Privy  ${stack.urls.privy}
   эмулятор он-рампа ${stack.urls.onramp}
+  RPC ZeroDev (эмулятор) ${stack.urls.zerodev ?? "— API сам отправляет операции (AA=self)"}
   сеть (anvil)    ${stack.urls.rpc}  chainId ${stack.chain.chainId}
 ${
   demo

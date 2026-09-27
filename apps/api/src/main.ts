@@ -10,7 +10,14 @@ const addr = (n: string) => getAddress(need(n)) as Address;
 
 const { app, tick } = await compose({
   databaseUrl: need("DATABASE_URL"),
-  chain: { chainId: Number(need("CHAIN_ID")), rpcUrl: need("RPC_URL"), entryPoint: addr("ENTRYPOINT"), submitterKey: need("SUBMITTER_PRIVATE_KEY") as Hex },
+  // ZERODEV_RPC: the project RPC from the ZeroDev dashboard — bundler and paymaster in one URL
+  chain: {
+    chainId: Number(need("CHAIN_ID")),
+    rpcUrl: need("RPC_URL"),
+    entryPoint: addr("ENTRYPOINT"),
+    submitterKey: need("SUBMITTER_PRIVATE_KEY") as Hex,
+    bundlerUrl: process.env.ZERODEV_RPC || process.env.BUNDLER_URL || undefined,
+  },
   deployment: { factory: addr("KERNEL_FACTORY"), validator: addr("WEIGHTED_VALIDATOR"), escrow: addr("ESCROW"), token: addr("TOKEN") },
   privy: process.env.PRIVY_EMULATOR_URL
     ? { emulatorUrl: process.env.PRIVY_EMULATOR_URL }
@@ -20,7 +27,9 @@ const { app, tick } = await compose({
   tokenDecimals: Number(process.env.TOKEN_DECIMALS ?? 6),
   claimTip: BigInt(process.env.CLAIM_TIP_UNITS ?? "50000"),
   maxRowsPerBatch: Number(process.env.MAX_ROWS_PER_BATCH ?? 40),
-  paymaster: process.env.PAYMASTER_URL
+  paymaster: process.env.ZERODEV_RPC
+    ? { zerodev: { url: process.env.ZERODEV_RPC } }
+    : process.env.PAYMASTER_URL
     ? { erc7677: { url: process.env.PAYMASTER_URL } }
     : process.env.PAYMASTER_ADDRESS
       ? { local: { address: addr("PAYMASTER_ADDRESS"), signerKey: need("PAYMASTER_SIGNER_KEY") as Hex } }

@@ -5,6 +5,11 @@
   "type": "module",
   "main": "src/index.ts",
   "types": "src/index.ts",
-  "dependencies": { "viem": "2.56.9" },
-  "devDependencies": { "@types/node": "^22.0.0" }
+  "dependencies": {
+    "@pimlico/alto": "0.0.21",
+    "viem": "2.56.9"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0"
+  }
 }

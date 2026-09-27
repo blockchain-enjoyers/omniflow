@@ -50,7 +50,7 @@ export async function setEthBalance(rpcUrl: string, who: Address, wei: bigint) {
 
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { mkdirSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { mnemonicToAccount, privateKeyToAccount } from "viem/accounts";
 
 /** anvil's publicly known development mnemonic — test-only keys, never used on a real network. */
@@ -119,4 +119,50 @@ export async function startDevStack(o: DevStackOptions): Promise<DevStack> {
   );
   const d = JSON.parse(readFileSync(resolve(o.contractsDir, out), "utf8"));
   return { rpcUrl, chainId, anvil, ...d } as DevStack;
+}
+
+// ------------------------------------------------------------------ a real ERC-4337 bundler on the local chain
+
+import { createRequire } from "node:module";
+
+/** anvil keys 3 and 4: the bundler's executor and utility accounts (test-only, public mnemonic) */
+export const BUNDLER_EXECUTOR_KEY = anvilKey(3);
+export const BUNDLER_UTILITY_KEY = anvilKey(4);
+
+export interface LocalBundler {
+  url: string;
+  process: ChildProcess;
+}
+
+/**
+ * Pimlico's open-source bundler Alto (GPL-3.0; run as a separate process, not linked) against anvil. `safeMode` is meant
+ * to enforce ERC-7562 through debug_traceCall; in 0.0.21 it fails for EntryPoint v0.7 before any rule is applied
+ * (revert data `DelegateAndRevert` not in its ABI), so it is off by default.
+ */
+export async function startAlto(rpcUrl: string, entryPoint: Address, o: { port?: number; safeMode?: boolean } = {}): Promise<LocalBundler> {
+  // the package exports only "."; the CLI sits next to it (package.json "bin": ./esm/cli/alto.js)
+  const bin = resolve(dirname(createRequire(import.meta.url).resolve("@pimlico/alto")), "cli/alto.js");
+  const port = o.port ?? 4300 + Math.floor(Math.random() * 600);
+  const args = [bin, "--entrypoints", entryPoint, "--executor-private-keys", BUNDLER_EXECUTOR_KEY, "--utility-private-key", BUNDLER_UTILITY_KEY, "--rpc-url", rpcUrl, "--port", String(port), "--safe-mode", String(o.safeMode ?? false), "--log-level", process.env.ALTO_LOG_LEVEL ?? "warn"];
+  const proc = spawn(process.execPath, args, { stdio: ["ignore", process.env.ALTO_LOG_FILE ? "pipe" : "ignore", "pipe"] });
+  if (process.env.ALTO_LOG_FILE) {
+    const { createWriteStream } = await import("node:fs");
+    const out = createWriteStream(process.env.ALTO_LOG_FILE);
+    proc.stdout?.pipe(out);
+    proc.stderr?.pipe(out);
+  }
+  let err = "";
+  proc.stderr?.on("data", (d) => (err += d.toString()));
+  const url = `http://127.0.0.1:${port}`;
+  for (let i = 0; i < 150; i++) {
+    try {
+      await rpc(url, "eth_supportedEntryPoints", []);
+      return { url, process: proc };
+    } catch {
+      if (proc.exitCode !== null) throw new Error(`alto exited: ${err.slice(-2000)}`);
+      await new Promise((r) => setTimeout(r, 200));
+    }
+  }
+  proc.kill();
+  throw new Error(`alto did not start on ${url}: ${err.slice(-2000)}`);
 }
