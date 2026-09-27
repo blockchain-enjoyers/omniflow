@@ -10,17 +10,17 @@ export function Mailbox() {
   return (
     <>
       <div className="page-head">
-        <div><h1>Dev-ящик</h1><div className="sub">Все письма, которые отправило бы приложение: коды входа, приглашения, ссылки на платежи.</div></div>
-        <a href="#/" className="btn secondary">← В кабинет</a>
+        <div><h1>Dev mailbox</h1><div className="sub">Every email the app would send: login codes, invitations, payment links.</div></div>
+        <a href="#/" className="btn secondary">← Dashboard</a>
       </div>
-      <Callout tone="emu">Эмуляция почты: провайдер не выбран. Настоящих писем никто не получает.</Callout>
-      <Section flush testid="mailbox" title="Письма" actions={
+      <Callout tone="emu">Emulated email: no provider is chosen yet. Nobody receives real emails.</Callout>
+      <Section flush testid="mailbox" title="Emails" actions={
         <>
-          <input className="input-inline" style={{ width: 220 }} placeholder="фильтр по адресу" value={to} onChange={(e) => setTo(e.target.value.trim())} />
-          <button className="secondary sm" onClick={() => list.reload()}>Обновить</button>
+          <input className="input-inline" style={{ width: 220 }} placeholder="filter by address" value={to} onChange={(e) => setTo(e.target.value.trim())} />
+          <button className="secondary sm" onClick={() => list.reload()}>Refresh</button>
         </>
       }>
-        {list.data?.length === 0 && <div className="empty">Писем пока нет.</div>}
+        {list.data?.length === 0 && <div className="empty">No emails yet.</div>}
         {list.data?.map((m) => (
           <article key={m.id} className="mail" data-testid="mail">
             <div className="mail-meta"><span>{dateTime(m.sent_at)}</span><span>{m.from_name} → <b>{m.to_addr}</b></span></div>

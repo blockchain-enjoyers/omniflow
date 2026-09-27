@@ -4,8 +4,8 @@ import { call, type Batch, type Receipt, type Review, type ReviewRow } from "../
 import { Addr, Badge, Callout, Err, Section, short, Table, usdc, useAction, useLoad } from "../ui";
 
 const who = (r: ReviewRow) => `${r.name}${r.address ? ` · ${short(r.address)}` : ""}${r.email ? ` · ${r.email}` : ""}`;
-const REASON: Record<string, string> = { "no-address-no-email": "нет ни адреса, ни почты — ждёт реквизитов", "other-chain": "другая сеть — не уйдёт" };
-const BATCH_KIND: Record<string, string> = { pay: "выплата", revoke: "отзыв", rekey: "новые ссылки" };
+const REASON: Record<string, string> = { "no-address-no-email": "no address and no email — waiting for details", "other-chain": "other chain — will not be sent" };
+const BATCH_KIND: Record<string, string> = { pay: "payout", revoke: "revoke", rekey: "new links" };
 
 export function PayoutPage({ id }: { id: string }) {
   const auth = useAuth();
@@ -31,19 +31,19 @@ export function PayoutPage({ id }: { id: string }) {
     const e = edit[r.row];
     const setE = (patch: { amount?: string; address?: string; email?: string }) => setEdit({ ...edit, [r.row]: { ...e, ...patch } });
     return [
-      r.status === "in_escrow" ? <input type="checkbox" aria-label={`выбрать ${r.name}`} data-testid={`pick-${r.name}`} checked={picked.includes(r.row)} onChange={(x) => setPicked(x.target.checked ? [...picked, r.row] : picked.filter((y) => y !== r.row))} /> : null,
+      r.status === "in_escrow" ? <input type="checkbox" aria-label={`select ${r.name}`} data-testid={`pick-${r.name}`} checked={picked.includes(r.row)} onChange={(x) => setPicked(x.target.checked ? [...picked, r.row] : picked.filter((y) => y !== r.row))} /> : null,
       <span>
         <span className="cell-main">{r.name}</span>
-        <span className="cell-sub">{r.address ? <Addr value={r.address} /> : <span className="small muted">{r.email ?? "нет реквизитов"}</span>}</span>
+        <span className="cell-sub">{r.address ? <Addr value={r.address} /> : <span className="small muted">{r.email ?? "no details"}</span>}</span>
         {e && (
           <span className="edit-row">
-            <input aria-label="сумма" data-testid={`row-amount-${r.name}`} inputMode="decimal" placeholder="сумма" value={e.amount ?? ""} onChange={(x) => setE({ amount: x.target.value })} />
-            <input aria-label="адрес" className="mono" data-testid={`row-address-${r.name}`} placeholder="адрес 0x…" value={e.address ?? ""} onChange={(x) => setE({ address: x.target.value.trim() })} />
-            <input aria-label="почта" data-testid={`row-email-${r.name}`} placeholder="почта" value={e.email ?? ""} onChange={(x) => setE({ email: x.target.value.trim() })} />
+            <input aria-label="amount" data-testid={`row-amount-${r.name}`} inputMode="decimal" placeholder="amount" value={e.amount ?? ""} onChange={(x) => setE({ amount: x.target.value })} />
+            <input aria-label="address" className="mono" data-testid={`row-address-${r.name}`} placeholder="address 0x…" value={e.address ?? ""} onChange={(x) => setE({ address: x.target.value.trim() })} />
+            <input aria-label="email" data-testid={`row-email-${r.name}`} placeholder="email" value={e.email ?? ""} onChange={(x) => setE({ email: x.target.value.trim() })} />
             <span className="row">
-              <button className="sm" data-testid={`row-save-${r.name}`} onClick={a.run(async () => { await call(auth.headers, "PATCH", `/payouts/${id}/rows/${r.row}`, { amount: e.amount, address: e.address || null, email: e.email || null }); const n = { ...edit }; delete n[r.row]; setEdit(n); await reload(); })}>Сохранить</button>
-              <button className="ghost sm" data-testid={`row-remove-${r.name}`} onClick={a.run(async () => { await call(auth.headers, "PATCH", `/payouts/${id}/rows/${r.row}`, { remove: true }); await reload(); })}>Удалить строку</button>
-              <button className="ghost sm" onClick={() => { const n = { ...edit }; delete n[r.row]; setEdit(n); }}>Отмена</button>
+              <button className="sm" data-testid={`row-save-${r.name}`} onClick={a.run(async () => { await call(auth.headers, "PATCH", `/payouts/${id}/rows/${r.row}`, { amount: e.amount, address: e.address || null, email: e.email || null }); const n = { ...edit }; delete n[r.row]; setEdit(n); await reload(); })}>Save</button>
+              <button className="ghost sm" data-testid={`row-remove-${r.name}`} onClick={a.run(async () => { await call(auth.headers, "PATCH", `/payouts/${id}/rows/${r.row}`, { remove: true }); await reload(); })}>Remove row</button>
+              <button className="ghost sm" onClick={() => { const n = { ...edit }; delete n[r.row]; setEdit(n); }}>Cancel</button>
             </span>
           </span>
         )}
@@ -51,7 +51,7 @@ export function PayoutPage({ id }: { id: string }) {
       <span className="num">{usdc(r.amount)}</span>,
       <Badge s={r.status} testid={`status-${r.name}`} extra={r.failReason ? ` (${r.failReason})` : ""} />,
       <Addr value={r.txHash} />,
-      editable(r.status) && !closed && !e ? <button className="ghost sm" data-testid={`edit-${r.name}`} onClick={() => setEdit({ ...edit, [r.row]: { amount: String(Number(r.amount) / 1e6), address: r.address ?? "", email: r.email ?? "" } })}>Изменить</button> : null,
+      editable(r.status) && !closed && !e ? <button className="ghost sm" data-testid={`edit-${r.name}`} onClick={() => setEdit({ ...edit, [r.row]: { amount: String(Number(r.amount) / 1e6), address: r.address ?? "", email: r.email ?? "" } })}>Edit</button> : null,
     ];
   };
   const orgId = receipt.data?.payout.orgId;
@@ -59,69 +59,69 @@ export function PayoutPage({ id }: { id: string }) {
 
   return (
     <>
-      {orgId && <a className="back" href={`#/org/${orgId}`}>← К организации</a>}
+      {orgId && <a className="back" href={`#/org/${orgId}`}>← Organization</a>}
       <div className="page-head">
         <div>
           <h1 data-testid="payout-title">{receipt.data?.payout.title ?? "…"}</h1>
-          <div className="sub row">{receipt.data && <span data-testid="payout-status"><Badge s={receipt.data.payout.status} /></span>}<span>{rows.length} строк · {usdc(rows.reduce((x, r) => x + BigInt(r.amount), 0n))}</span></div>
+          <div className="sub row">{receipt.data && <span data-testid="payout-status"><Badge s={receipt.data.payout.status} /></span>}<span>{rows.length} rows · {usdc(rows.reduce((x, r) => x + BigInt(r.amount), 0n))}</span></div>
         </div>
         <div className="row">
-          <button className="secondary" data-testid="repeat" onClick={a.run(async () => { const p = await call<{ id: string }>(auth.headers, "POST", `/payouts/${id}/repeat`, {}); window.location.hash = `#/payout/${p.id}`; })}>Повторить с правкой</button>
-          {!closed && <button className="secondary" data-testid="close" onClick={a.run(async () => { await call(auth.headers, "POST", `/payouts/${id}/close`); await reload(); })}>Закрыть выплату</button>}
+          <button className="secondary" data-testid="repeat" onClick={a.run(async () => { const p = await call<{ id: string }>(auth.headers, "POST", `/payouts/${id}/repeat`, {}); window.location.hash = `#/payout/${p.id}`; })}>Repeat with edits</button>
+          {!closed && <button className="secondary" data-testid="close" onClick={a.run(async () => { await call(auth.headers, "POST", `/payouts/${id}/close`); await reload(); })}>Close payout</button>}
         </div>
       </div>
 
       {s && !closed && s.toAddress + s.byEmail === 0 && s.notSent.length > 0 && (
-        <Callout tone="warn">Отправлять нечего. Не уйдут: {s.notSent.map((n) => `${n.row.name} — ${REASON[n.reason] ?? n.reason}`).join("; ")}.</Callout>
+        <Callout tone="warn">Nothing to send. Not sent: {s.notSent.map((n) => `${n.row.name} — ${REASON[n.reason] ?? n.reason}`).join("; ")}.</Callout>
       )}
       {s && s.toAddress + s.byEmail > 0 && !closed && (
-        <Section title="Проверка перед отправкой" desc="Посмотрите на новых получателей и изменения — это главный источник необратимой ошибки." testid="review">
+        <Section title="Review before sending" desc="Check new recipients and changes — the main source of irreversible mistakes." testid="review">
           <div className="grid grid-3" style={{ marginBottom: 16 }}>
-            <div className="stat"><span className="label">Уйдёт</span><span className="value sm">{s.toAddress + s.byEmail} строк</span><span className="foot">на адрес {s.toAddress} · по ссылке на почту {s.byEmail}</span></div>
-            <div className="stat"><span className="label">Сумма</span><span className="value sm">{usdc(s.total)}</span><span className="foot">Автовозврат: {review.data!.autoRefundDays ? `через ${review.data!.autoRefundDays} дн.` : "бессрочно"}</span></div>
-            <div className="stat"><span className="label">Баланс</span><span className="value sm">{s.balanceSufficient ? <span className="badge ok">хватает</span> : <span className="badge bad">не хватает</span>}</span></div>
+            <div className="stat"><span className="label">Will be sent</span><span className="value sm">{s.toAddress + s.byEmail} rows</span><span className="foot">to address {s.toAddress} · by email link {s.byEmail}</span></div>
+            <div className="stat"><span className="label">Amount</span><span className="value sm">{usdc(s.total)}</span><span className="foot">Auto-refund: {review.data!.autoRefundDays ? `after ${review.data!.autoRefundDays} days` : "never"}</span></div>
+            <div className="stat"><span className="label">Balance</span><span className="value sm">{s.balanceSufficient ? <span className="badge ok">sufficient</span> : <span className="badge bad">insufficient</span>}</span></div>
           </div>
-          <div className={`review-group ${s.newRecipients.length ? "warn" : ""}`}><h4>Новые получатели: {s.newRecipients.length}</h4>
+          <div className={`review-group ${s.newRecipients.length ? "warn" : ""}`}><h4>New recipients: {s.newRecipients.length}</h4>
             {s.newRecipients.length > 0 && <ul>{s.newRecipients.map((r) => <li key={r.rowId}>{who(r)} — <b className="num">{usdc(r.amount)}</b></li>)}</ul>}</div>
-          {s.changedAmount.length > 0 && <div className="review-group"><h4>Сумма изменилась</h4><ul>{s.changedAmount.map((c) => <li key={c.row.rowId}>{who(c.row)}: {usdc(c.previous)} → <b>{usdc(c.row.amount)}</b></li>)}</ul></div>}
-          {s.outliers.length > 0 && <div className="review-group warn"><h4>Выбросы</h4><ul>{s.outliers.map((c) => <li key={c.row.rowId}>{who(c.row)}: было {usdc(c.previous)}, сейчас {usdc(c.row.amount)}</li>)}</ul></div>}
-          {[...s.duplicateAddress, ...s.duplicateEmail].length > 0 && <div className="review-group warn"><h4>Дубли</h4><ul>{[...s.duplicateAddress, ...s.duplicateEmail].map((g, i) => <li key={i}>{g.map(who).join(" | ")}</li>)}</ul></div>}
-          {s.notSent.length > 0 && <div className="review-group"><h4>Не уйдут: {s.notSent.length}</h4><ul>{s.notSent.map((n) => <li key={n.row.rowId}>{n.row.name}: {REASON[n.reason] ?? n.reason}</li>)}</ul></div>}
+          {s.changedAmount.length > 0 && <div className="review-group"><h4>Amount changed</h4><ul>{s.changedAmount.map((c) => <li key={c.row.rowId}>{who(c.row)}: {usdc(c.previous)} → <b>{usdc(c.row.amount)}</b></li>)}</ul></div>}
+          {s.outliers.length > 0 && <div className="review-group warn"><h4>Outliers</h4><ul>{s.outliers.map((c) => <li key={c.row.rowId}>{who(c.row)}: was {usdc(c.previous)}, now {usdc(c.row.amount)}</li>)}</ul></div>}
+          {[...s.duplicateAddress, ...s.duplicateEmail].length > 0 && <div className="review-group warn"><h4>Duplicates</h4><ul>{[...s.duplicateAddress, ...s.duplicateEmail].map((g, i) => <li key={i}>{g.map(who).join(" | ")}</li>)}</ul></div>}
+          {s.notSent.length > 0 && <div className="review-group"><h4>Not sent: {s.notSent.length}</h4><ul>{s.notSent.map((n) => <li key={n.row.rowId}>{n.row.name}: {REASON[n.reason] ?? n.reason}</li>)}</ul></div>}
           <div className="actions">
             {openBatch ? (
-              <a className="btn secondary" href={`#/approve/${openBatch.id}`}>Партия на подтверждении — открыть</a>
+              <a className="btn secondary" href={`#/approve/${openBatch.id}`}>A batch is awaiting approval — open</a>
             ) : (
               <button data-testid="freeze" disabled={a.busy || s.toAddress + s.byEmail === 0} onClick={a.run(async () => { await call(auth.headers, "POST", `/payouts/${id}/batches`); await reload(); })}>
-                Отправить на подтверждение
+                Send for approval
               </button>
             )}
           </div>
         </Section>
       )}
 
-      <Section flush title="Строки" testid="rows" actions={<button className="ghost sm" data-testid="refresh" onClick={reload}>Обновить</button>}>
+      <Section flush title="Rows" testid="rows" actions={<button className="ghost sm" data-testid="refresh" onClick={reload}>Refresh</button>}>
         <Table
-          cols={[...(selectable ? [{ label: "" }] : []), { label: "Кому", primary: true }, { label: "Сумма", className: "r" }, { label: "Статус" }, { label: "Транзакция" }, { label: "" }]}
+          cols={[...(selectable ? [{ label: "" }] : []), { label: "Recipient", primary: true }, { label: "Amount", className: "r" }, { label: "Status" }, { label: "Transaction" }, { label: "" }]}
           rows={rows.map((r) => ({ key: r.row, cells: selectable ? rowCells(r) : rowCells(r).slice(1) }))}
         />
         {picked.length > 0 && (
           <div style={{ padding: "16px 20px", borderTop: "1px solid var(--border)" }}>
-            <p style={{ marginBottom: 8 }}><b>Выбрано неполученных платежей: {picked.length}.</b> <span className="hint">Оба действия подтверждаются порогом, как выплата. Отозванные деньги вернутся на аккаунт организации.</span></p>
+            <p style={{ marginBottom: 8 }}><b>Unclaimed payments selected: {picked.length}.</b> <span className="hint">Both actions are approved by the threshold, like a payout. Revoked money returns to the organization account.</span></p>
             <div className="row">
-              <button data-testid="rekey" onClick={a.run(async () => { await call(auth.headers, "POST", `/payouts/${id}/rekey`, { rows: picked }); setPicked([]); await reload(); })}>Выслать новые ссылки</button>
-              <button data-testid="revoke" className="danger" onClick={a.run(async () => { await call(auth.headers, "POST", `/payouts/${id}/revoke`, { rows: picked }); setPicked([]); await reload(); })}>Отозвать</button>
+              <button data-testid="rekey" onClick={a.run(async () => { await call(auth.headers, "POST", `/payouts/${id}/rekey`, { rows: picked }); setPicked([]); await reload(); })}>Send new links</button>
+              <button data-testid="revoke" className="danger" onClick={a.run(async () => { await call(auth.headers, "POST", `/payouts/${id}/revoke`, { rows: picked }); setPicked([]); await reload(); })}>Revoke</button>
             </div>
           </div>
         )}
         {!closed && (
           <div style={{ padding: "16px 20px", borderTop: "1px solid var(--border)" }}>
-            <h3 style={{ marginTop: 0 }}>Добавить строку</h3>
+            <h3 style={{ marginTop: 0 }}>Add a row</h3>
             <div className="row">
-              <input className="grow" data-testid="add-name" placeholder="имя" value={add.name} onChange={(e) => setAdd({ ...add, name: e.target.value })} />
-              <input className="grow mono" data-testid="add-address" placeholder="адрес 0x…" value={add.address} onChange={(e) => setAdd({ ...add, address: e.target.value.trim() })} />
-              <input className="grow" data-testid="add-email" placeholder="или почта" value={add.email} onChange={(e) => setAdd({ ...add, email: e.target.value.trim() })} />
-              <input className="w-amount" data-testid="add-amount" inputMode="decimal" placeholder="сумма" value={add.amount} onChange={(e) => setAdd({ ...add, amount: e.target.value })} />
-              <button className="secondary" data-testid="add-row" disabled={!add.name || !add.amount} onClick={a.run(async () => { await call(auth.headers, "POST", `/payouts/${id}/rows`, { name: add.name, address: add.address || undefined, email: add.email || undefined, amount: add.amount, chainId: receipt.data!.payout.chainId }); setAdd({ name: "", address: "", email: "", amount: "" }); await reload(); })}>+ Строка</button>
+              <input className="grow" data-testid="add-name" placeholder="name" value={add.name} onChange={(e) => setAdd({ ...add, name: e.target.value })} />
+              <input className="grow mono" data-testid="add-address" placeholder="address 0x…" value={add.address} onChange={(e) => setAdd({ ...add, address: e.target.value.trim() })} />
+              <input className="grow" data-testid="add-email" placeholder="or email" value={add.email} onChange={(e) => setAdd({ ...add, email: e.target.value.trim() })} />
+              <input className="w-amount" data-testid="add-amount" inputMode="decimal" placeholder="amount" value={add.amount} onChange={(e) => setAdd({ ...add, amount: e.target.value })} />
+              <button className="secondary" data-testid="add-row" disabled={!add.name || !add.amount} onClick={a.run(async () => { await call(auth.headers, "POST", `/payouts/${id}/rows`, { name: add.name, address: add.address || undefined, email: add.email || undefined, amount: add.amount, chainId: receipt.data!.payout.chainId }); setAdd({ name: "", address: "", email: "", amount: "" }); await reload(); })}>+ Row</button>
             </div>
           </div>
         )}
@@ -129,14 +129,14 @@ export function PayoutPage({ id }: { id: string }) {
       </Section>
 
       {!closed && rows.some((r) => !r.address && ["waiting_details", "ready"].includes(r.status)) && (
-        <Section title="Форма реквизитов" desc="Получатель сам укажет адрес или почту. Это не ссылка на деньги; после заполнения строку нужно отправить на подтверждение." testid="forms">
-          <button data-testid="forms-create" onClick={a.run(async () => setLinks(await call(auth.headers, "POST", `/payouts/${id}/forms`, {})))}>Создать ссылки</button>
+        <Section title="Payment details form" desc="The recipient enters their address or email. It is not a link to money; once filled in, send the row for approval." testid="forms">
+          <button data-testid="forms-create" onClick={a.run(async () => setLinks(await call(auth.headers, "POST", `/payouts/${id}/forms`, {})))}>Create links</button>
           {links.length > 0 && (
             <ul className="check-list" style={{ marginTop: 12 }}>
               {links.map((l) => (
                 <li key={l.row}>
                   <span className="cell-main" style={{ minWidth: 80 }}>{l.name}</span>
-                  {l.emailed ? <span className="badge ok">отправлена на почту</span> : <span style={{ minWidth: 0 }}><span className="mono small" data-testid={`form-link-${l.name}`}>{l.link}</span><span className="cell-sub hint">Передайте получателю</span></span>}
+                  {l.emailed ? <span className="badge ok">emailed</span> : <span style={{ minWidth: 0 }}><span className="mono small" data-testid={`form-link-${l.name}`}>{l.link}</span><span className="cell-sub hint">Pass it to the recipient</span></span>}
                 </li>
               ))}
             </ul>
@@ -145,20 +145,20 @@ export function PayoutPage({ id }: { id: string }) {
       )}
 
       <div className="grid grid-2">
-        <Section flush title="Партии" desc="Каждая партия подтверждается порогом отдельно." testid="batches">
+        <Section flush title="Batches" desc="Each batch is approved by the threshold separately." testid="batches">
           <Table
-            cols={[{ label: "№" }, { label: "Что", primary: true }, { label: "Статус" }, { label: "Транзакция" }]}
+            cols={[{ label: "#" }, { label: "What", primary: true }, { label: "Status" }, { label: "Transaction" }]}
             rows={(batches.data ?? []).map((b) => ({ key: b.id, cells: [b.batch_no + 1, BATCH_KIND[b.kind] ?? b.kind, <a href={`#/approve/${b.id}`} data-testid={`batch-${b.batch_no}`}><Badge s={b.status} /></a>, <Addr value={b.tx_hash} />] }))}
-            empty="Ещё не отправлялась."
+            empty="Not sent yet."
           />
         </Section>
-        <Section title="Сделать регулярной" desc="Расписание создаёт черновик по образцу этой выплаты; отправка — как всегда, после проверки и подписей.">
+        <Section title="Make it recurring" desc="A schedule creates a draft from this payout; sending works as always — after review and signatures.">
           <div className="row">
-            <select className="input-inline" data-testid="every" value={every} onChange={(e) => setEvery(e.target.value as "month" | "week")}><option value="month">раз в месяц</option><option value="week">раз в неделю</option></select>
+            <select className="input-inline" data-testid="every" value={every} onChange={(e) => setEvery(e.target.value as "month" | "week")}><option value="month">monthly</option><option value="week">weekly</option></select>
             <button className="secondary" data-testid="schedule" onClick={a.run(async () => {
               await call(auth.headers, "POST", `/orgs/${orgId}/schedules`, { title: receipt.data!.payout.title, templatePayoutId: id, every, firstRunAt: nextRun(every) });
               window.location.hash = `#/org/${orgId}/schedules`;
-            })}>Создать расписание</button>
+            })}>Create schedule</button>
           </div>
         </Section>
       </div>

@@ -191,19 +191,19 @@ export function LoginForm({ title, subtitle }: { title?: string; subtitle?: stri
       {title && <h2 style={{ marginBottom: 4 }}>{title}</h2>}
       {subtitle && <p className="hint">{subtitle}</p>}
       {auth.mode === "privy" ? (
-        <div className="actions"><button className="block" onClick={run(() => auth.startLogin())}>Войти по почте или passkey</button></div>
+        <div className="actions"><button className="block" onClick={run(() => auth.startLogin())}>Sign in with email or passkey</button></div>
       ) : !auth.needsCode ? (
         <form onSubmit={run(() => auth.startLogin(email))} style={{ marginTop: 12 }}>
-          <label className="field"><span>Почта</span><input data-testid="login-email" type="email" autoComplete="email" placeholder="you@company.com" value={email} onChange={(e) => setEmail(e.target.value.trim())} /></label>
-          <div className="actions"><button className="block" type="submit" data-testid="login-start" disabled={busy || !email}>Получить код</button></div>
+          <label className="field"><span>Email</span><input data-testid="login-email" type="email" autoComplete="email" placeholder="you@company.com" value={email} onChange={(e) => setEmail(e.target.value.trim())} /></label>
+          <div className="actions"><button className="block" type="submit" data-testid="login-start" disabled={busy || !email}>Send code</button></div>
         </form>
       ) : (
         <form onSubmit={run(() => auth.verifyCode(code))} style={{ marginTop: 12 }}>
-          <label className="field"><span>Код из письма</span><input data-testid="login-code" inputMode="numeric" autoComplete="one-time-code" placeholder="6 цифр" value={code} onChange={(e) => setCode(e.target.value.trim())} /></label>
-          <div className="actions"><button className="block" type="submit" data-testid="login-verify" disabled={busy || !code}>Войти</button></div>
+          <label className="field"><span>Code from the email</span><input data-testid="login-code" inputMode="numeric" autoComplete="one-time-code" placeholder="6 digits" value={code} onChange={(e) => setCode(e.target.value.trim())} /></label>
+          <div className="actions"><button className="block" type="submit" data-testid="login-verify" disabled={busy || !code}>Sign in</button></div>
         </form>
       )}
-      {auth.mode === "emulator" && <div className="callout emu" style={{ marginTop: 16, marginBottom: 0 }}>Вход через эмулятор Privy — код придёт в dev-ящик.</div>}
+      {auth.mode === "emulator" && <div className="callout emu" style={{ marginTop: 16, marginBottom: 0 }}>Privy emulator sign-in — the code arrives in the dev mailbox.</div>}
       {err && <p className="error">{err}</p>}
     </div>
   );

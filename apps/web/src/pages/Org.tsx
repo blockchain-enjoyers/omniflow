@@ -5,10 +5,10 @@ import { call, type Org, type PayoutListItem } from "../api";
 import { Addr, Badge, Callout, chainName, date, dateTime, Err, Field, Section, Stat, Table, usdc, useAction, useLoad } from "../ui";
 
 const TABS: [string, string][] = [
-  ["payouts", "Выплаты"], ["book", "Адресная книга"], ["schedules", "Регулярные"], ["topup", "Пополнить"],
-  ["reports", "Отчёты"], ["members", "Участники"], ["settings", "Настройки"], ["audit", "Журнал"],
+  ["payouts", "Payouts"], ["book", "Address book"], ["schedules", "Recurring"], ["topup", "Add funds"],
+  ["reports", "Reports"], ["members", "Members"], ["settings", "Settings"], ["audit", "Activity"],
 ];
-const ROLE: Record<string, string> = { admin: "администратор", operator: "оператор", approver: "подтверждающий" };
+const ROLE: Record<string, string> = { admin: "admin", operator: "operator", approver: "approver" };
 
 export function OrgPage({ id, tab }: { id: string; tab: string }) {
   const auth = useAuth();
@@ -18,7 +18,7 @@ export function OrgPage({ id, tab }: { id: string; tab: string }) {
   const weight = o?.approvers.reduce((a, b) => a + b.weight, 0) ?? 0;
   return (
     <>
-      <a className="back" href="#/">← Организации</a>
+      <a className="back" href="#/">← Organizations</a>
       <div className="org-head">
         <h1 data-testid="org-title">{o?.name ?? "…"}</h1>
         {o && (
@@ -31,9 +31,9 @@ export function OrgPage({ id, tab }: { id: string; tab: string }) {
       </div>
       {o && (
         <div className="grid grid-3 stats">
-          <Stat label="Баланс аккаунта" value={bal.data ? usdc(bal.data.balance) : "…"} testid="balance" foot="Газ платит Omniflow — ETH не нужен" />
-          <Stat label="По ссылкам, ещё не получено" sm value={bal.data ? usdc(bal.data.reservedInEscrow) : "…"} foot="Это всё ещё ваши деньги: их можно отозвать" />
-          <Stat label="Подтверждение" sm value={`${o.threshold} из ${weight}`} foot={`${o.approvers.length} подтверждающих, записаны в контракте`} />
+          <Stat label="Account balance" value={bal.data ? usdc(bal.data.balance) : "…"} testid="balance" foot="Omniflow pays gas — no ETH needed" />
+          <Stat label="Sent by link, not yet claimed" sm value={bal.data ? usdc(bal.data.reservedInEscrow) : "…"} foot="Still your money: it can be revoked" />
+          <Stat label="Approval" sm value={`${o.threshold} of ${weight}`} foot={`${o.approvers.length} approvers, recorded in the contract`} />
         </div>
       )}
       <nav className="tabs">
@@ -65,19 +65,19 @@ function Payouts({ org }: { org: Org }) {
   const isOp = org.myRoles.includes("operator");
   return (
     <>
-      <Section flush title="Выплаты" testid="payouts" actions={isOp && <button className={open ? "secondary" : ""} data-testid="new-payout-toggle" onClick={() => setOpen(!open)}>{open ? "Скрыть" : "+ Новая выплата"}</button>}>
+      <Section flush title="Payouts" testid="payouts" actions={isOp && <button className={open ? "secondary" : ""} data-testid="new-payout-toggle" onClick={() => setOpen(!open)}>{open ? "Hide" : "+ New payout"}</button>}>
         <Table
-          cols={[{ label: "Название", primary: true }, { label: "Строк", className: "r" }, { label: "Сумма", className: "r" }, { label: "Статус" }, { label: "Создана" }]}
+          cols={[{ label: "Title", primary: true }, { label: "Rows", className: "r" }, { label: "Amount", className: "r" }, { label: "Status" }, { label: "Created" }]}
           rows={(list.data ?? []).map((p) => ({ key: p.id, cells: [<a href={`#/payout/${p.id}`} className="cell-main">{p.title}</a>, <span className="num">{p.rows}</span>, <span className="num">{usdc(p.total)}</span>, <Badge s={p.status} />, date(p.created_at)] }))}
-          empty="Выплат пока нет."
+          empty="No payouts yet."
         />
         <div style={{ padding: "0 20px" }}><Err e={list.error} /></div>
       </Section>
       {isOp && open && (
-        <Section title="Новая выплата из CSV" desc={<>Колонки: <code>name,email,address,chain_id,amount[,category]</code>. Без адреса и почты строка подождёт реквизитов. Сеть — {chainName(org.chain_id)}, <code>chain_id</code> = {org.chain_id}.</>} testid="new-payout">
-          <Field label="Название"><input data-testid="payout-title" placeholder="Например, гранты за сентябрь" value={title} onChange={(e) => setTitle(e.target.value)} /></Field>
-          <Field label="Строки CSV"><textarea data-testid="payout-csv" value={csv} onChange={(e) => setCsv(e.target.value)} /></Field>
-          <Field label="Автовозврат неполученного, дней" help={`Пусто — как в настройках: ${org.auto_refund_days ?? "бессрочно"}.`}>
+        <Section title="New payout from CSV" desc={<>Columns: <code>name,email,address,chain_id,amount[,category]</code>. A row without address and email waits for payment details. Chain — {chainName(org.chain_id)}, <code>chain_id</code> = {org.chain_id}.</>} testid="new-payout">
+          <Field label="Title"><input data-testid="payout-title" placeholder="e.g. September grants" value={title} onChange={(e) => setTitle(e.target.value)} /></Field>
+          <Field label="CSV rows"><textarea data-testid="payout-csv" value={csv} onChange={(e) => setCsv(e.target.value)} /></Field>
+          <Field label="Return unclaimed after, days" help={`Empty — as in settings: ${org.auto_refund_days ?? "never"}.`}>
             <input className="w-amount" inputMode="numeric" value={override} onChange={(e) => setOverride(e.target.value)} />
           </Field>
           <div className="actions">
@@ -89,7 +89,7 @@ function Payouts({ org }: { org: Org }) {
                 window.location.hash = `#/payout/${p.id}`;
               })}
             >
-              Загрузить и проверить
+              Upload and review
             </button>
           </div>
           <Err e={a.error} />
@@ -112,9 +112,9 @@ function Book({ org }: { org: Org }) {
   const picked = Object.values(pick).filter(Boolean).length;
   return (
     <>
-      <Section flush title="Адресная книга" desc="Пополняется сама из оплаченных строк. Изменение здесь не меняет уже отправленного." testid="book">
+      <Section flush title="Address book" desc="Fills itself from paid rows. Editing here does not change anything already sent." testid="book">
         <Table
-          cols={[{ label: "Имя", primary: true }, { label: "Адрес / почта" }, { label: "Категория" }, { label: "Прошлая сумма", className: "r" }, ...(isOp ? [{ label: "Сумма сейчас" }, { label: "" }] : [])]}
+          cols={[{ label: "Name", primary: true }, { label: "Address / email" }, { label: "Category" }, { label: "Last amount", className: "r" }, ...(isOp ? [{ label: "Amount now" }, { label: "" }] : [])]}
           rows={(book.data ?? []).map((e) => ({
             key: e.id,
             cells: [
@@ -125,17 +125,17 @@ function Book({ org }: { org: Org }) {
               ...(isOp
                 ? [
                     <input data-testid={`pick-${e.name}`} className="w-amount" inputMode="decimal" placeholder="USDC" value={pick[e.id] ?? ""} onChange={(x) => setPick({ ...pick, [e.id]: x.target.value })} />,
-                    <button className="ghost sm" data-testid={`book-delete-${e.name}`} onClick={a.run(async () => { await call(auth.headers, "DELETE", `/orgs/${org.id}/address-book/${e.id}`); await book.reload(); })}>Удалить</button>,
+                    <button className="ghost sm" data-testid={`book-delete-${e.name}`} onClick={a.run(async () => { await call(auth.headers, "DELETE", `/orgs/${org.id}/address-book/${e.id}`); await book.reload(); })}>Delete</button>,
                   ]
                 : []),
             ],
           }))}
-          empty="Книга пуста — получатели появятся после первой выплаты."
+          empty="The book is empty — recipients appear after the first payout."
         />
         {isOp && (
           <div style={{ padding: "16px 20px", borderTop: "1px solid var(--border)" }}>
             <div className="row">
-              <input className="grow" data-testid="book-payout-title" placeholder="Название выплаты" value={title} onChange={(e) => setTitle(e.target.value)} />
+              <input className="grow" data-testid="book-payout-title" placeholder="Payout title" value={title} onChange={(e) => setTitle(e.target.value)} />
               <button
                 data-testid="book-payout"
                 disabled={!picked || !title}
@@ -145,22 +145,22 @@ function Book({ org }: { org: Org }) {
                   window.location.hash = `#/payout/${p.id}`;
                 })}
               >
-                Выплата выбранным{picked ? ` (${picked})` : ""}
+                Pay selected{picked ? ` (${picked})` : ""}
               </button>
             </div>
           </div>
         )}
       </Section>
       {isOp && (
-        <Section title="Добавить получателя">
+        <Section title="Add a recipient">
           <div className="grid grid-2">
-            <Field label="Имя"><input data-testid="book-name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></Field>
-            <Field label="Категория"><input data-testid="book-category" placeholder="гранты, подрядчики…" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} /></Field>
-            <Field label="Адрес кошелька"><input className="mono" data-testid="book-address" placeholder="0x…" value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value.trim() })} /></Field>
-            <Field label="или почта"><input data-testid="book-email" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value.trim() })} /></Field>
+            <Field label="Name"><input data-testid="book-name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></Field>
+            <Field label="Category"><input data-testid="book-category" placeholder="grants, contractors…" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} /></Field>
+            <Field label="Wallet address"><input className="mono" data-testid="book-address" placeholder="0x…" value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value.trim() })} /></Field>
+            <Field label="or email"><input data-testid="book-email" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value.trim() })} /></Field>
           </div>
           <div className="actions" style={{ marginTop: 0 }}>
-            <button data-testid="book-save" disabled={!form.name || (!form.address && !form.email)} onClick={a.run(async () => { await call(auth.headers, "POST", `/orgs/${org.id}/address-book`, { ...form, chainId: org.chain_id, address: form.address || null, email: form.email || null }); setForm({ name: "", email: "", address: "", category: "" }); await book.reload(); })}>Сохранить</button>
+            <button data-testid="book-save" disabled={!form.name || (!form.address && !form.email)} onClick={a.run(async () => { await call(auth.headers, "POST", `/orgs/${org.id}/address-book`, { ...form, chainId: org.chain_id, address: form.address || null, email: form.email || null }); setForm({ name: "", email: "", address: "", category: "" }); await book.reload(); })}>Save</button>
           </div>
         </Section>
       )}
@@ -175,20 +175,20 @@ function Schedules({ org }: { org: Org }) {
   const a = useAction();
   const isOp = org.myRoles.includes("operator");
   return (
-    <Section flush title="Регулярные выплаты" desc="Расписание создаёт черновик по образцу и пишет операторам. Без проверки и подтверждения ничего не уходит. Создать — на странице выплаты-образца." testid="schedules">
+    <Section flush title="Recurring payouts" desc="A schedule creates a draft from a template and emails the operators. Nothing leaves without review and approval. Create one on the template payout page." testid="schedules">
       <Table
-        cols={[{ label: "Название", primary: true }, { label: "Период" }, { label: "Следующий черновик" }, { label: "Статус" }, { label: "" }]}
+        cols={[{ label: "Title", primary: true }, { label: "Every" }, { label: "Next draft" }, { label: "Status" }, { label: "" }]}
         rows={(list.data ?? []).map((s) => ({
           key: s.id,
           cells: [
-            <span><span className="cell-main">{s.title}</span> <a className="small" href={`#/payout/${s.templatePayoutId}`}>образец</a></span>,
-            s.every === "month" ? "раз в месяц" : "раз в неделю",
+            <span><span className="cell-main">{s.title}</span> <a className="small" href={`#/payout/${s.templatePayoutId}`}>template</a></span>,
+            s.every === "month" ? "monthly" : "weekly",
             dateTime(s.nextRunAt),
-            <span className={`badge ${s.active ? "ok" : ""}`} data-testid={`schedule-state-${s.title}`}>{s.active ? "активно" : "на паузе"}</span>,
-            isOp ? <button className="secondary sm" data-testid={`schedule-toggle-${s.title}`} onClick={a.run(async () => { await call(auth.headers, "PATCH", `/orgs/${org.id}/schedules/${s.id}`, { active: !s.active }); await list.reload(); })}>{s.active ? "Приостановить" : "Возобновить"}</button> : null,
+            <span className={`badge ${s.active ? "ok" : ""}`} data-testid={`schedule-state-${s.title}`}>{s.active ? "active" : "paused"}</span>,
+            isOp ? <button className="secondary sm" data-testid={`schedule-toggle-${s.title}`} onClick={a.run(async () => { await call(auth.headers, "PATCH", `/orgs/${org.id}/schedules/${s.id}`, { active: !s.active }); await list.reload(); })}>{s.active ? "Pause" : "Resume"}</button> : null,
           ],
         }))}
-        empty="Регулярных выплат нет."
+        empty="No recurring payouts."
       />
       <div style={{ padding: "0 20px" }}><Err e={list.error || a.error} /></div>
     </Section>
@@ -212,36 +212,36 @@ function TopUp({ org, onDone }: { org: Org; onDone: () => void }) {
   const canBuy = org.myRoles.includes("admin") || org.myRoles.includes("approver");
   return (
     <div className={canBuy ? "grid grid-2" : ""}>
-      <Section title="Перевести USDC" desc="Из Safe, с биржи или со своего кошелька" testid="topup">
+      <Section title="Transfer USDC" desc="From a Safe, an exchange or your own wallet" testid="topup">
         <div className="topup-grid">
           <div>
-            <p className="hint" style={{ marginBottom: 6 }}>Адрес аккаунта организации, сеть <b>{chainName(org.chain_id)}</b></p>
+            <p className="hint" style={{ marginBottom: 6 }}>Organization account address, chain <b>{chainName(org.chain_id)}</b></p>
             <div className="addr-box" data-testid="topup-address">{org.account}</div>
           </div>
           <AddressQr address={org.account} />
         </div>
         <ul className="hint" style={{ marginTop: 14 }}>
-          <li>В Safe: New transaction → Send tokens → USDC → этот адрес.</li>
-          <li>Сверьте адрес с тем, что подписывали подтверждающие. Первый раз — пробный перевод.</li>
+          <li>In Safe: New transaction → Send tokens → USDC → this address.</li>
+          <li>Check the address against the one the approvers signed. Send a small test amount first.</li>
         </ul>
-        <Callout tone="warn">Только {chainName(org.chain_id)}. USDC из другой сети на этот адрес не дойдёт.</Callout>
+        <Callout tone="warn">{chainName(org.chain_id)} only. USDC sent from another chain will not arrive.</Callout>
       </Section>
       {canBuy && (
-        <Section title="Купить USDC за деньги" desc="Покупка и KYC — у партнёра. Деньги приходят на аккаунт организации." testid="onramp">
-          <Field label="Сумма, USD">
+        <Section title="Buy USDC" desc="Purchase and KYC happen at the partner. The money lands on the organization account." testid="onramp">
+          <Field label="Amount, USD">
             <input data-testid="onramp-amount" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} />
           </Field>
           <div className="actions" style={{ marginTop: 0 }}>
-            <button data-testid="onramp-start" onClick={a.run(async () => setSession(await call(auth.headers, "POST", `/orgs/${org.id}/onramp`, { fiatAmount: Number(amount), returnUrl: window.location.href })))}>Продолжить</button>
+            <button data-testid="onramp-start" onClick={a.run(async () => setSession(await call(auth.headers, "POST", `/orgs/${org.id}/onramp`, { fiatAmount: Number(amount), returnUrl: window.location.href })))}>Continue</button>
           </div>
           {session && (
             <div style={{ marginTop: 16 }}>
               <Callout tone={session.destination === org.account ? "ok" : "bad"}>
-                {session.provider}: деньги придут на <span className="mono">{session.destination}</span> — {session.destination === org.account ? "совпадает с аккаунтом организации." : "НЕ СОВПАДАЕТ — не платите."}
+                {session.provider}: funds will go to <span className="mono">{session.destination}</span> — {session.destination === org.account ? "matches the organization account." : "DOES NOT MATCH — do not pay."}
               </Callout>
               <div className="actions" style={{ marginTop: 0 }}>
-                <a className="btn" data-testid="onramp-open" href={session.url} target="_blank" rel="noreferrer">Открыть окно оплаты</a>
-                <button className="secondary" onClick={onDone}>Обновить баланс</button>
+                <a className="btn" data-testid="onramp-open" href={session.url} target="_blank" rel="noreferrer">Open payment window</a>
+                <button className="secondary" onClick={onDone}>Refresh balance</button>
               </div>
             </div>
           )}
@@ -262,8 +262,8 @@ function Reports({ org }: { org: Org }) {
   return (
     <Section
       flush
-      title="Отчёт по выплатам"
-      desc={lines.data?.[0] ? `Стоимость в USD: ${lines.data[0].priceSource}.` : "Дата, получатель, сумма, стоимость в USD, категория, хеш."}
+      title="Payments report"
+      desc={lines.data?.[0] ? `USD value: ${lines.data[0].priceSource}.` : "Date, recipient, amount, USD value, category, hash."}
       testid="reports"
       actions={
         <button
@@ -279,22 +279,22 @@ function Reports({ org }: { org: Org }) {
             URL.revokeObjectURL(url);
           })}
         >
-          Выгрузить CSV
+          Export CSV
         </button>
       }
     >
       <div className="row" style={{ padding: "0 20px 16px" }}>
-        <label className="row small muted">с <input className="input-inline" data-testid="report-from" type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></label>
-        <label className="row small muted">по <input className="input-inline" data-testid="report-to" type="date" value={to} onChange={(e) => setTo(e.target.value)} /></label>
+        <label className="row small muted">from <input className="input-inline" data-testid="report-from" type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></label>
+        <label className="row small muted">to <input className="input-inline" data-testid="report-to" type="date" value={to} onChange={(e) => setTo(e.target.value)} /></label>
       </div>
       <Table
         testid="report-table"
-        cols={[{ label: "Получатель", primary: true }, { label: "Дата" }, { label: "Выплата" }, { label: "Сумма", className: "r" }, { label: "USD", className: "r" }, { label: "Категория" }, { label: "Статус" }, { label: "Хеш" }]}
+        cols={[{ label: "Recipient", primary: true }, { label: "Date" }, { label: "Payout" }, { label: "Amount", className: "r" }, { label: "USD", className: "r" }, { label: "Category" }, { label: "Status" }, { label: "Hash" }]}
         rows={(lines.data ?? []).map((l, i) => ({
           key: String(i),
           cells: [<span className="cell-main">{l.recipient}</span>, dateTime(l.date), l.payout, <span className="num">{l.amount}</span>, <span className="num">{l.usdValue}</span>, l.category ?? "—", <Badge s={l.status} />, <Addr value={l.txHash} />],
         }))}
-        empty="За выбранный период выплат нет."
+        empty="No payments in this period."
       />
       <div style={{ padding: "0 20px" }}><Err e={lines.error || a.error} /></div>
     </Section>
@@ -309,25 +309,25 @@ function Members({ org }: { org: Org }) {
   const isAdmin = org.myRoles.includes("admin");
   return (
     <>
-      <Section flush title="Участники" desc="Состав подтверждающих записан в контракте аккаунта; сменить его может только операция, подтверждённая порогом." testid="members">
+      <Section flush title="Members" desc="The approver set is recorded in the account contract; only an operation approved by the threshold can change it." testid="members">
         <Table
-          cols={[{ label: "Почта", primary: true }, { label: "Роли" }, { label: "Статус" }, ...(isAdmin ? [{ label: "" }] : [])]}
+          cols={[{ label: "Email", primary: true }, { label: "Roles" }, { label: "Status" }, ...(isAdmin ? [{ label: "" }] : [])]}
           rows={(list.data ?? []).map((m) => ({
             key: m.email,
             cells: [
               <span className="row"><span className="avatar">{m.email.slice(0, 1).toUpperCase()}</span><span className="cell-main" data-testid={`member-${m.email}`}>{m.email}</span></span>,
               <span className="row">{m.roles.map((r) => <span key={r} className="chip">{ROLE[r] ?? r}</span>)}</span>,
-              <span className={`badge ${m.status === "active" ? "ok" : "warn"}`}>{m.status === "active" ? "вошёл" : "приглашён"}</span>,
-              ...(isAdmin ? [m.roles.includes("operator") && !m.roles.includes("admin") ? <button className="ghost sm" data-testid={`remove-${m.email}`} onClick={a.run(async () => { await call(auth.headers, "DELETE", `/orgs/${org.id}/members/${encodeURIComponent(m.email)}`); await list.reload(); })}>Убрать</button> : null] : []),
+              <span className={`badge ${m.status === "active" ? "ok" : "warn"}`}>{m.status === "active" ? "active" : "invited"}</span>,
+              ...(isAdmin ? [m.roles.includes("operator") && !m.roles.includes("admin") ? <button className="ghost sm" data-testid={`remove-${m.email}`} onClick={a.run(async () => { await call(auth.headers, "DELETE", `/orgs/${org.id}/members/${encodeURIComponent(m.email)}`); await list.reload(); })}>Remove</button> : null] : []),
             ],
           }))}
         />
       </Section>
       {isAdmin && (
-        <Section title="Пригласить оператора" desc="Оператор готовит выплаты, но не может их подписать.">
+        <Section title="Invite an operator" desc="An operator prepares payouts but cannot sign them.">
           <div className="row">
-            <input className="grow" data-testid="invite-email" type="email" placeholder="почта оператора" value={email} onChange={(e) => setEmail(e.target.value.trim())} />
-            <button data-testid="invite" disabled={!email} onClick={a.run(async () => { await call(auth.headers, "POST", `/orgs/${org.id}/members`, { email }); setEmail(""); await list.reload(); })}>Пригласить</button>
+            <input className="grow" data-testid="invite-email" type="email" placeholder="operator email" value={email} onChange={(e) => setEmail(e.target.value.trim())} />
+            <button data-testid="invite" disabled={!email} onClick={a.run(async () => { await call(auth.headers, "POST", `/orgs/${org.id}/members`, { email }); setEmail(""); await list.reload(); })}>Invite</button>
           </div>
         </Section>
       )}
@@ -344,17 +344,17 @@ function Settings({ org, onSaved }: { org: Org; onSaved: () => void }) {
   const isAdmin = org.myRoles.includes("admin");
   return (
     <div className="narrow" style={{ marginLeft: 0 }}>
-      <Section title="Автовозврат" desc="Значение по умолчанию для новых выплат; в каждой выплате его можно изменить." testid="settings">
-        <Field label="Вернуть неполученные платежи через, дней" help="Пусто — бессрочно. По истечении срока деньги возвращаются на аккаунт организации.">
+      <Section title="Auto-refund" desc="Default for new payouts; each payout can override it." testid="settings">
+        <Field label="Return unclaimed payments after, days" help="Empty — never. When the period ends the money returns to the organization account.">
           <input data-testid="autorefund" className="w-amount" inputMode="numeric" disabled={!isAdmin} value={days} onChange={(e) => { setDays(e.target.value); setSaved(false); }} />
         </Field>
         {isAdmin ? (
           <div className="actions" style={{ marginTop: 0 }}>
-            <button data-testid="settings-save" onClick={a.run(async () => { await call(auth.headers, "PATCH", `/orgs/${org.id}/settings`, { autoRefundDays: days ? Number(days) : null }); setSaved(true); onSaved(); })}>Сохранить</button>
-            {saved && <span className="badge ok" data-testid="settings-saved">сохранено</span>}
+            <button data-testid="settings-save" onClick={a.run(async () => { await call(auth.headers, "PATCH", `/orgs/${org.id}/settings`, { autoRefundDays: days ? Number(days) : null }); setSaved(true); onSaved(); })}>Save</button>
+            {saved && <span className="badge ok" data-testid="settings-saved">saved</span>}
           </div>
         ) : (
-          <p className="hint">Менять может администратор.</p>
+          <p className="hint">Only an admin can change this.</p>
         )}
         <Err e={a.error} />
       </Section>
@@ -363,21 +363,21 @@ function Settings({ org, onSaved }: { org: Org; onSaved: () => void }) {
 }
 
 const ACTION: Record<string, string> = {
-  "org.deployed": "аккаунт создан", "org.imported": "аккаунт подключён", "payout.created": "выплата создана", "batch.frozen": "партия на подтверждение",
-  "batch.revoke_frozen": "отзыв на подтверждение", "batch.rekey_frozen": "новые ссылки на подтверждение", "batch.approved": "подпись", "batch.submitted": "отправлено в сеть",
-  "forms.created": "формы реквизитов", "settings.updated": "настройки изменены", "member.invited": "приглашён оператор", "member.removed": "оператор убран", "payout.closed": "выплата закрыта",
-  "book.saved": "получатель в книге", "book.deleted": "получатель удалён из книги", "onramp.session": "покупка USDC", "row.added": "строка добавлена", "row.edited": "строка изменена",
-  "schedule.created": "регулярная выплата", "setup.started": "создание начато", "setup.joined": "подтверждающий вошёл", "setup.confirmed": "состав подписан",
+  "org.deployed": "account created", "org.imported": "account connected", "payout.created": "payout created", "batch.frozen": "batch sent for approval",
+  "batch.revoke_frozen": "revoke sent for approval", "batch.rekey_frozen": "new links sent for approval", "batch.approved": "signed", "batch.submitted": "submitted on chain",
+  "forms.created": "details forms created", "settings.updated": "settings changed", "member.invited": "operator invited", "member.removed": "operator removed", "payout.closed": "payout closed",
+  "book.saved": "recipient saved", "book.deleted": "recipient deleted", "onramp.session": "USDC purchase", "row.added": "row added", "row.edited": "row edited",
+  "schedule.created": "recurring payout", "setup.started": "setup started", "setup.joined": "approver joined", "setup.confirmed": "approver set signed",
 };
 
 function Audit({ org }: { org: Org }) {
   const auth = useAuth();
   const log = useLoad(() => call<{ at: string; action: string; actor: string | null; details: unknown }[]>(auth.headers, "GET", `/orgs/${org.id}/audit`), [org.id]);
   return (
-    <Section flush title="Журнал действий" desc="Кто и что сделал в организации." testid="audit">
+    <Section flush title="Activity log" desc="Who did what in the organization." testid="audit">
       <Table
         testid="audit-table"
-        cols={[{ label: "Что", primary: true }, { label: "Кто" }, { label: "Когда" }, { label: "Детали" }]}
+        cols={[{ label: "What", primary: true }, { label: "Who" }, { label: "When" }, { label: "Details" }]}
         rows={(log.data ?? []).map((l, i) => ({
           key: String(i),
           cells: [<span className="cell-main" data-action={l.action}>{ACTION[l.action] ?? l.action}</span>, l.actor ?? "—", dateTime(l.at), <span className="mono small muted">{l.details ? JSON.stringify(l.details).slice(0, 80) : ""}</span>],

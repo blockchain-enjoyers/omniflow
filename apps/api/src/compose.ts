@@ -57,7 +57,7 @@ export async function compose(cfg: ComposeConfig) {
     maxRowsPerBatch: cfg.maxRowsPerBatch ?? 40,
     claimBaseUrl: cfg.urls.claim,
     appUrl: cfg.urls.app,
-    senderDisplayName: (org) => `${org} через Omniflow`,
+    senderDisplayName: (org) => `${org} via Omniflow`,
   }, sponsor);
   const orgs = new OrgService(db, chain, mailer, { chainId: cfg.chain.chainId, ...cfg.deployment, appUrl: cfg.urls.app });
   const forms = new FormService(db, mailer, cfg.urls.form);

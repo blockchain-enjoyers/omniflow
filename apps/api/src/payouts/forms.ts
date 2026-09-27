@@ -28,8 +28,8 @@ export class FormService {
       if (r.email) {
         await this.mailer.send({
           to: r.email,
-          subject: `${r.org} через Omniflow: укажите, куда вам платить`,
-          text: `${r.org} собирается отправить вам выплату. Укажите адрес кошелька (или оставьте почту — тогда придёт ссылка на получение):\n${link}\n\nЭто не платёж и не ссылка на получение денег.`,
+          subject: `${r.org} via Omniflow: tell us where to pay you`,
+          text: `${r.org} is about to send you a payout. Enter your wallet address (or leave your email — then you will receive a claim link):\n${link}\n\nThis is not a payment and not a link to receive money.`,
         });
       }
       out.push({ row: r.row_key, name: r.name, link, emailed: Boolean(r.email) });

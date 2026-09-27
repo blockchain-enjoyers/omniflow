@@ -33,8 +33,8 @@ export function App({ withLogin }: { withLogin: boolean }) {
     return (
       <Frame>
         <section className="card">
-          <h1>Ссылка повреждена</h1>
-          <p className="hint" style={{ marginTop: 8 }}>Откройте ссылку из письма целиком, без изменений.</p>
+          <h1>This link is broken</h1>
+          <p className="hint" style={{ marginTop: 8 }}>Open the link from the email in full, without changes.</p>
         </section>
       </Frame>
     );
@@ -56,15 +56,15 @@ export function App({ withLogin }: { withLogin: boolean }) {
   return (
     <Frame>
       <section className="card hero">
-        <p className="hint" style={{ marginBottom: 4 }}>Вам отправлен платёж</p>
+        <p className="hint" style={{ marginBottom: 4 }}>You have been sent a payment</p>
         <h1 className="amount" data-testid="amount">{amount}</h1>
         {deposit?.status === DepositStatus.Pending && deposit.autoRefundAt > 0 && (
-          <p className="small muted" style={{ margin: 0 }}>Получите до {new Date(deposit.autoRefundAt * 1000).toLocaleDateString("ru-RU")} — потом деньги вернутся отправителю.</p>
+          <p className="small muted" style={{ margin: 0 }}>Claim by {new Date(deposit.autoRefundAt * 1000).toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric" })} — after that the money returns to the sender.</p>
         )}
-        {readError && <div className="callout bad" style={{ marginTop: 12 }}>Не удалось прочитать платёж из сети: {readError}. Укажите другой RPC в технических деталях.</div>}
-        {deposit?.status === DepositStatus.Claimed && phase.kind !== "done" && <div className="callout ok" style={{ marginTop: 12 }} data-testid="status">Платёж уже получен.</div>}
-        {deposit?.status === DepositStatus.Refunded && <div className="callout" style={{ marginTop: 12 }} data-testid="status">Отправитель вернул этот платёж себе.</div>}
-        {deposit?.status === DepositStatus.None && <div className="callout" style={{ marginTop: 12 }} data-testid="status">Платёж по этой ссылке не найден в этой сети.</div>}
+        {readError && <div className="callout bad" style={{ marginTop: 12 }}>Could not read the payment from the chain: {readError}. Set another RPC under Technical details.</div>}
+        {deposit?.status === DepositStatus.Claimed && phase.kind !== "done" && <div className="callout ok" style={{ marginTop: 12 }} data-testid="status">This payment has already been claimed.</div>}
+        {deposit?.status === DepositStatus.Refunded && <div className="callout" style={{ marginTop: 12 }} data-testid="status">The sender took this payment back.</div>}
+        {deposit?.status === DepositStatus.None && <div className="callout" style={{ marginTop: 12 }} data-testid="status">No payment for this link on this chain.</div>}
       </section>
 
       {pending && (
@@ -74,8 +74,8 @@ export function App({ withLogin }: { withLogin: boolean }) {
           )}
           {RELAYER_URL && (
             <section className="card">
-              <h2>{withLogin ? "На свой адрес" : "Получить на адрес"}</h2>
-              <p className="hint" style={{ marginTop: 4 }}>Адрес кошелька в сети {chainLabel(link.chainId)}. Газ за получение платит отправитель.</p>
+              <h2>{withLogin ? "To my own address" : "Receive to an address"}</h2>
+              <p className="hint" style={{ marginTop: 4 }}>A wallet address on {chainLabel(link.chainId)}. The sender pays the gas.</p>
               <div className="row">
                 <input className="grow mono" data-testid="address" placeholder="0x…" value={address} onChange={(e) => setAddress(e.target.value.trim())} />
                 <button
@@ -83,51 +83,51 @@ export function App({ withLogin }: { withLogin: boolean }) {
                   disabled={!isAddress(address) || phase.kind === "working"}
                   onClick={() => run(async () => ({ recipient: address, hash: await claimViaRelayer(RELAYER_URL!, link, address as Address, rpc) }))}
                 >
-                  Получить
+                  Receive
                 </button>
               </div>
             </section>
           )}
           <section className="card">
-            <h2>{RELAYER_URL ? "Своим кошельком" : "Получить своим кошельком"}</h2>
-            <p className="hint" style={{ marginTop: 4 }}>Кошелёк отправит транзакцию сам — нужно немного ETH на газ. Работает, даже если сервисы Omniflow недоступны.</p>
+            <h2>{RELAYER_URL ? "With my own wallet" : "Receive with my own wallet"}</h2>
+            <p className="hint" style={{ marginTop: 4 }}>Your wallet sends the transaction itself — it needs a little ETH for gas. Works even if Omniflow is down.</p>
             <button className="secondary block" data-testid="claim-wallet" disabled={!injected() || phase.kind === "working"} onClick={() => run(() => claimWithOwnWallet(injected()!, link, rpc))}>
-              {injected() ? "Подключить кошелёк и получить" : "Кошелёк в браузере не найден"}
+              {injected() ? "Connect wallet and receive" : "No wallet found in this browser"}
             </button>
           </section>
         </>
       )}
 
-      {phase.kind === "working" && <div className="callout info">Отправляем…</div>}
-      {phase.kind === "error" && <div className="callout bad" data-testid="error">Не получилось: {phase.message}</div>}
+      {phase.kind === "working" && <div className="callout info">Sending…</div>}
+      {phase.kind === "error" && <div className="callout bad" data-testid="error">Did not work: {phase.message}</div>}
       {phase.kind === "done" && (
         <section className="card done" data-testid="done">
           <div className="check">✓</div>
-          <h2>Готово</h2>
-          <p style={{ marginTop: 6 }}>{amount} отправлено на</p>
+          <h2>Done</h2>
+          <p style={{ marginTop: 6 }}>{amount} sent to</p>
           <p className="mono small" style={{ overflowWrap: "anywhere" }}>{phase.recipient}</p>
-          <p className="small muted" style={{ overflowWrap: "anywhere", marginBottom: 0 }}>Транзакция {phase.hash}</p>
+          <p className="small muted" style={{ overflowWrap: "anywhere", marginBottom: 0 }}>Transaction {phase.hash}</p>
         </section>
       )}
 
       <details className="card tech">
-        <summary>Технические детали</summary>
-        <p className="small" style={{ marginTop: 12, overflowWrap: "anywhere" }}>Сеть {link.chainId}, контракт {link.escrow}, платёж {link.depositId}.</p>
+        <summary>Technical details</summary>
+        <p className="small" style={{ marginTop: 12, overflowWrap: "anywhere" }}>Chain {link.chainId}, contract {link.escrow}, payment {link.depositId}.</p>
         <label className="field"><span>RPC</span><input className="mono" value={rpc} onChange={(e) => setRpc(e.target.value.trim())} /></label>
-        <p className="small muted" style={{ marginBottom: 0 }}>Ссылка — единственный ключ к платежу. Не пересылайте её. Omniflow никогда не попросит сид-фразу или подпись.</p>
+        <p className="small muted" style={{ marginBottom: 0 }}>The link is the only key to this payment. Do not forward it. Omniflow will never ask for a seed phrase or a signature.</p>
       </details>
     </Frame>
   );
 }
 
-const chainLabel = (id: number) => ({ 42161: "Arbitrum One", 421614: "Arbitrum Sepolia", 31337: "локальная (anvil)" })[id] ?? String(id);
+const chainLabel = (id: number) => ({ 42161: "Arbitrum One", 421614: "Arbitrum Sepolia", 31337: "local chain (anvil)" })[id] ?? String(id);
 
 function Frame({ children }: { children: ReactNode }) {
   return (
     <div className="claim-page">
       <div className="brand"><span className="logo">O</span> Omniflow</div>
       <main className="claim-main">{children}</main>
-      <p className="small muted" style={{ textAlign: "center" }}>Некастодиальные выплаты: деньги лежат в контракте, пока вы их не заберёте.</p>
+      <p className="small muted" style={{ textAlign: "center" }}>Non-custodial payouts: the money stays in a contract until you claim it.</p>
     </div>
   );
 }
@@ -138,21 +138,21 @@ function EmbeddedClaim({ busy, onClaim }: { busy: boolean; onClaim: (wallet: Add
   if (!auth.ready) return null;
   return (
     <section className="card recommended">
-      <div className="row" style={{ justifyContent: "space-between" }}><h2>Получить по почте</h2><span className="badge accent">проще всего</span></div>
+      <div className="row" style={{ justifyContent: "space-between" }}><h2>Receive with email</h2><span className="badge accent">easiest</span></div>
       {!auth.user ? (
         <>
-          <p className="hint" style={{ marginTop: 4 }}>Войдите по почте — кошелёк создастся сам, ничего устанавливать не нужно.</p>
+          <p className="hint" style={{ marginTop: 4 }}>Sign in with your email — a wallet is created for you, nothing to install.</p>
           <LoginForm />
         </>
       ) : !auth.user.wallet ? (
-        <p className="hint">Кошелёк ещё создаётся — обновите страницу через несколько секунд.</p>
+        <p className="hint">Your wallet is still being created — refresh in a few seconds.</p>
       ) : (
         <>
-          <p className="hint" style={{ marginTop: 4 }}>Вы вошли как <b>{auth.user.email ?? auth.user.did}</b>. Платёж придёт на ваш кошелёк:</p>
+          <p className="hint" style={{ marginTop: 4 }}>Signed in as <b>{auth.user.email ?? auth.user.did}</b>. The payment goes to your wallet:</p>
           <div className="addr-box small" data-testid="embedded-wallet">{auth.user.wallet}</div>
           <div className="actions">
-            <button data-testid="claim-embedded" disabled={busy} onClick={() => onClaim(auth.user!.wallet!)}>Получить</button>
-            <button className="ghost" onClick={() => void auth.logout()}>Выйти</button>
+            <button data-testid="claim-embedded" disabled={busy} onClick={() => onClaim(auth.user!.wallet!)}>Receive</button>
+            <button className="ghost" onClick={() => void auth.logout()}>Sign out</button>
           </div>
         </>
       )}

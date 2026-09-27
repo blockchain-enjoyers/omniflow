@@ -461,8 +461,8 @@ export class PayoutService {
         if (ins.rowCount && r.status === "in_escrow") {
           await this.mailer.send({
             to: r.email,
-            subject: `${this.cfg.senderDisplayName(org.name)}: ${r.claim_signer && (await c.query(`SELECT count(*) FROM emails WHERE row_id=$1`, [r.id])).rows[0].count > 1 ? "новая ссылка на ваш платёж" : "вам отправлен платёж"}`,
-            text: `Здравствуйте, ${r.name}.\n\n${org.name} отправил(а) вам платёж. Чтобы получить деньги, откройте ссылку:\n${link}\n\nСсылка — единственный ключ к платежу. Не пересылайте её никому.`,
+            subject: `${this.cfg.senderDisplayName(org.name)}: ${r.claim_signer && (await c.query(`SELECT count(*) FROM emails WHERE row_id=$1`, [r.id])).rows[0].count > 1 ? "a new link to your payment" : "you have been sent a payment"}`,
+            text: `Hello ${r.name},\n\n${org.name} has sent you a payment. To receive the money, open this link:\n${link}\n\nThe link is the only key to the payment. Do not forward it to anyone.`,
           });
         }
         await c.query(`DELETE FROM claim_keys WHERE row_id=$1`, [r.id]);
@@ -549,24 +549,37 @@ export class PayoutService {
     const { batch, org } = await this.batchCtx(batchId);
     const m = manifestFromJson(batch.manifest);
     const total = m.rows.reduce((s, r) => (r.kind === "refund" ? s : s + r.amount + (r.kind === "escrow" ? r.tip : 0n)), 0n);
-    const amount = `${(Number(total) / 10 ** this.cfg.tokenDecimals).toLocaleString("ru-RU")} USDC`;
+    const amount = `${(Number(total) / 10 ** this.cfg.tokenDecimals).toLocaleString("en-US")} USDC`;
     const emails = (await this.db.query(`SELECT email FROM org_members WHERE org_id=$1 AND 'approver' = ANY(roles) AND status<>'removed'`, [org.id])).rows;
     for (const e of emails) {
       await this.mailer.send(
         kind === "pending"
           ? {
               to: e.email,
-              subject: `${org.name}: выплата ждёт вашего подтверждения — ${amount}`,
+              subject:
+                batch.kind === "revoke"
+                  ? `${org.name}: revoking ${m.rows.length} unclaimed payment(s) is waiting for your approval`
+                  : batch.kind === "rekey"
+                    ? `${org.name}: new links for ${m.rows.length} payment(s) are waiting for your approval`
+                    : `${org.name}: a payout is waiting for your approval — ${amount}`,
               text: batch.kind === "revoke"
-                ? `Оператор просит отозвать неполученные платежи (${m.rows.length}). Деньги вернутся на аккаунт организации.
-Открыть: ${this.cfg.appUrl}#/approve/${batchId}`
-                : `С аккаунта организации ${org.account} уйдёт ${amount}, ${m.rows.length} получателям.
-Проверьте и подтвердите: ${this.cfg.appUrl}#/approve/${batchId}`,
+                ? `An operator asks to revoke unclaimed payments (${m.rows.length}). The money returns to the organization account.
+Open: ${this.cfg.appUrl}#/approve/${batchId}`
+                : batch.kind === "rekey"
+                  ? `An operator asks to send new links for unclaimed payments (${m.rows.length}). The old links will stop working.
+Open: ${this.cfg.appUrl}#/approve/${batchId}`
+                  : `${amount} will leave the organization account ${org.account} to ${m.rows.length} recipients.
+Review and approve: ${this.cfg.appUrl}#/approve/${batchId}`,
             }
           : {
               to: e.email,
-              subject: `${org.name}: с аккаунта ушло ${amount}`,
-              text: `Партия исполнена. Транзакция ${batch.tx_hash}. Квитанция: ${this.cfg.appUrl}#/payout/${m.payoutId}`,
+              subject:
+                batch.kind === "revoke"
+                  ? `${org.name}: ${m.rows.length} unclaimed payment(s) returned to the account`
+                  : batch.kind === "rekey"
+                    ? `${org.name}: new links sent for ${m.rows.length} payment(s)`
+                    : `${org.name}: ${amount} left the account`,
+              text: `The batch was executed. Transaction ${batch.tx_hash}. Receipt: ${this.cfg.appUrl}#/payout/${m.payoutId}`,
             },
       );
     }

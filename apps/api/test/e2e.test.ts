@@ -122,7 +122,7 @@ describe.skipIf(!DB_URL)("sender side e2e (emulated Privy)", () => {
       .expect(201);
     setupId = r.body.id;
     expect(r.body.status).toBe("collecting");
-    expect((await inbox(a2.email))[0]!.subject).toBe("Acme DAO: вас назначили подтверждающим выплат");
+    expect((await inbox(a2.email))[0]!.subject).toBe("Acme DAO: you have been named a payout approver");
   });
 
   it("only named approvers can join; joining records their embedded wallet", async () => {
@@ -188,7 +188,7 @@ describe.skipIf(!DB_URL)("sender side e2e (emulated Privy)", () => {
 
   it("freezing notifies every approver", async () => {
     batchId = (await api.post(`/payouts/${payoutId}/batches`).set(ops.headers).expect(201)).body.id;
-    for (const a of [a1, a2, a3]) expect((await inbox(a.email))[0]!.subject).toMatch(/ждёт вашего подтверждения/);
+    for (const a of [a1, a2, a3]) expect((await inbox(a.email))[0]!.subject).toMatch(/waiting for your approval/);
   });
 
   it("an approver cannot pass off someone else's signature; operators cannot approve", async () => {
@@ -205,7 +205,7 @@ describe.skipIf(!DB_URL)("sender side e2e (emulated Privy)", () => {
     expect(await balance(alice)).toBe(1_000_000_000n);
     expect(await balance(bob)).toBe(2_000_500_000n);
     expect(await balance(account)).toBe(before - 6_000_500_000n - 50_000n);
-    expect((await inbox(a3.email))[0]!.subject).toMatch(/с аккаунта ушло/);
+    expect((await inbox(a3.email))[0]!.subject).toMatch(/left the account/);
     const bal = await api.get(`/orgs/${orgId}/balance`).set(ops.headers).expect(200);
     expect(bal.body.reservedInEscrow).toBe("3000000000"); // still the sender's money
   });
@@ -222,7 +222,7 @@ describe.skipIf(!DB_URL)("sender side e2e (emulated Privy)", () => {
   });
 
   it("Carol claims by the emailed link into a fresh wallet", async () => {
-    const mail = (await inbox("carol@example.test")).find((m) => m.subject.includes("вам отправлен платёж"))!;
+    const mail = (await inbox("carol@example.test")).find((m) => m.subject.includes("you have been sent a payment"))!;
     const link = parseClaimLink(mail.body.match(/http:\/\/claim\.local\/#\S+/)![0]);
     const wallet = privateKeyToAccount(generatePrivateKey()).address;
     const deadline = BigInt(Math.floor(Date.now() / 1000) + 3600);
@@ -275,7 +275,10 @@ describe.skipIf(!DB_URL)("sender side e2e (emulated Privy)", () => {
     await approveAndSubmit((await api.post(`/payouts/${p.body.id}/batches`).set(ops.headers).expect(201)).body.id);
     const before = await balance(account);
     const rv = await api.post(`/payouts/${p.body.id}/revoke`).set(ops.headers).send({ rows: ["row-2"] }).expect(201);
+    // the letters say what it is — a revoke, not "0 USDC leaves"
+    expect((await inbox(a1.email))[0]!.subject).toBe("Acme DAO: revoking 1 unclaimed payment(s) is waiting for your approval");
     await approveAndSubmit(rv.body.id, a2, a3);
+    expect((await inbox(a1.email))[0]!.subject).toBe("Acme DAO: 1 unclaimed payment(s) returned to the account");
     await payouts.pollEscrow(orgId);
     expect(await balance(account)).toBe(before + 11_050_000n);
     expect((await api.get(`/payouts/${p.body.id}/receipt`).set(ops.headers).expect(200)).body.rows[0].status).toBe("refunded");
@@ -323,7 +326,7 @@ describe.skipIf(!DB_URL)("sender side e2e (emulated Privy)", () => {
     expect(await lists.runSchedules()).toHaveLength(0); // next run is a month away
     const draft = (await api.get(`/payouts/${created[0]}/receipt`).set(ops.headers).expect(200)).body;
     expect(draft.payout.status).toBe("draft");
-    expect((await inbox(ops.email))[0]!.subject).toMatch(/черновик регулярной выплаты «Monthly stipends»/);
+    expect((await inbox(ops.email))[0]!.subject).toMatch(/recurring payout "Monthly stipends" has a draft/);
   });
 
   it("re-issuing a claim link — after N-of-M the new link works and the old one does not", async () => {
@@ -334,7 +337,7 @@ describe.skipIf(!DB_URL)("sender side e2e (emulated Privy)", () => {
     expect(await inbox("wu@example.test")).toHaveLength(1); // no new email before the rekey is on chain
     await approveAndSubmit(rk.body.id, a3, a2);
     const mails = await inbox("wu@example.test");
-    expect(mails[0]!.subject).toMatch(/новая ссылка на ваш платёж/);
+    expect(mails[0]!.subject).toMatch(/a new link to your payment/);
     const newLink = parseClaimLink(mails[0]!.body.match(/http:\/\/claim\.local\/#\S+/)![0]);
     const newLinkKey = () => newLink.key;
     const wallet = privateKeyToAccount(generatePrivateKey()).address;
@@ -353,13 +356,13 @@ describe.skipIf(!DB_URL)("sender side e2e (emulated Privy)", () => {
   it("the payments report and CSV export — date, recipient, amount, USD with its source, category, hash", async () => {
     const lines = (await api.get(`/orgs/${orgId}/reports/payments`).set(a2.headers).expect(200)).body;
     const aliceLine = lines.find((l: { recipient: string }) => l.recipient === "Alice");
-    expect(aliceLine).toMatchObject({ amount: "1000", token: "USDC", usdValue: "1000.00", category: "grants", status: "отправлено" });
-    expect(aliceLine.priceSource).toMatch(/номинал/);
+    expect(aliceLine).toMatchObject({ amount: "1000", token: "USDC", usdValue: "1000.00", category: "grants", status: "sent" });
+    expect(aliceLine.priceSource).toMatch(/at par/);
     expect(aliceLine.txHash).toMatch(/^0x[0-9a-f]{64}$/);
-    expect(lines.find((l: { recipient: string }) => l.recipient === "Carol").status).toBe("получено по ссылке");
+    expect(lines.find((l: { recipient: string }) => l.recipient === "Carol").status).toBe("claimed");
     const csv = await api.get(`/orgs/${orgId}/reports/payments`).query({ format: "csv" }).set(ops.headers).expect(200);
     expect(csv.headers["content-type"]).toMatch(/text\/csv/);
-    expect(csv.text.split("\n")[0]).toContain("Стоимость USD");
+    expect(csv.text.split("\n")[0]).toContain("USD value");
     await api.get(`/orgs/${orgId}/reports/payments`).set(outsider.headers).expect(403);
   });
 

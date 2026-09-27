@@ -12,7 +12,7 @@ export interface PriceSource {
  */
 export class StablecoinParity implements PriceSource {
   async usdPrice(): Promise<{ price: number; source: string }> {
-    return { price: 1, source: "номинал стейблкоина (1 USDC = 1 USD), не рыночная котировка" };
+    return { price: 1, source: "stablecoin at par (1 USDC = 1 USD), not a market quote" };
   }
 }
 
@@ -31,6 +31,8 @@ export interface ReportLine {
   txHash: string | null;
   claimedAt: string | null;
 }
+
+const STATUS_LABEL: Record<string, string> = { sent: "sent", in_escrow: "claim link sent, not yet claimed", claimed: "claimed via link", refunded: "returned to sender" };
 
 export class ReportService {
   constructor(private readonly db: Db, private readonly price: PriceSource, private readonly decimals: number, private readonly tokenSymbol = "USDC") {}
@@ -59,7 +61,7 @@ export class ReportService {
         usdValue: (Number(amount) * price).toFixed(2),
         priceSource: source,
         category: r.category,
-        status: ({ sent: "отправлено", in_escrow: "по ссылке, не получено", claimed: "получено по ссылке", refunded: "возвращено отправителю" } as Record<string, string>)[r.status] ?? r.status,
+        status: r.status,
         txHash: r.tx_hash,
         claimedAt: r.claimed_at ? new Date(r.claimed_at).toISOString() : null,
       });
@@ -68,7 +70,7 @@ export class ReportService {
   }
 
   static toCsv(lines: ReportLine[]): string {
-    const head = ["Дата (UTC)", "Выплата", "Получатель", "Адрес", "Почта", "Сумма", "Токен", "Стоимость USD", "Источник цены", "Категория", "Статус", "Хеш транзакции", "Получено"];
+    const head = ["Date (UTC)", "Payout", "Recipient", "Address", "Email", "Amount", "Token", "USD value", "Price source", "Category", "Status", "Transaction hash", "Claimed at"];
     const esc = (v: unknown) => {
       let s = v === null || v === undefined ? "" : String(v);
       // CSV/formula injection: names come from uploaded files. Quoting alone does not stop spreadsheets from
@@ -76,7 +78,7 @@ export class ReportService {
       if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
       return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
     };
-    const body = lines.map((l) => [l.date, l.payout, l.recipient, l.address, l.email, l.amount, l.token, l.usdValue, l.priceSource, l.category, l.status, l.txHash, l.claimedAt].map(esc).join(","));
+    const body = lines.map((l) => [l.date, l.payout, l.recipient, l.address, l.email, l.amount, l.token, l.usdValue, l.priceSource, l.category, STATUS_LABEL[l.status] ?? l.status, l.txHash, l.claimedAt].map(esc).join(","));
     return `﻿${[head.join(","), ...body].join("\n")}\n`;
   }
 }

@@ -41,13 +41,13 @@ function ConfirmDialog() {
   return (
     <div className="modal" data-testid="sign-modal" role="dialog" aria-modal="true">
       <div className="sheet">
-        <h2>Подпись кошельком</h2>
-        <p className="hint" style={{ marginTop: 6 }}>Вы подтверждаете:</p>
+        <h2>Sign with your wallet</h2>
+        <p className="hint" style={{ marginTop: 6 }}>You are approving:</p>
         <p style={{ fontWeight: 600 }}>{what}</p>
-        <div className="callout emu">Окно эмулятора Privy. Настоящий Privy покажет своё окно подтверждения.</div>
+        <div className="callout emu">Privy emulator window. Real Privy will show its own confirmation window.</div>
         <div className="actions">
-          <button className="secondary" onClick={() => done(false)}>Отмена</button>
-          <button data-testid="sign-confirm" onClick={() => done(true)}>Подписать</button>
+          <button className="secondary" onClick={() => done(false)}>Cancel</button>
+          <button data-testid="sign-confirm" onClick={() => done(true)}>Sign</button>
         </div>
       </div>
     </div>
@@ -80,17 +80,17 @@ function Shell() {
   if (parts[0] === "form") return <Bare><div className="narrow"><FormPage token={parts[1]!} /></div></Bare>;
   if (parts[0] === "dev" && parts[1] === "mailbox" && DEV) return <Bare><Mailbox /></Bare>;
 
-  if (!auth.ready) return <div className="auth-wrap"><span className="muted">Загрузка…</span></div>;
+  if (!auth.ready) return <div className="auth-wrap"><span className="muted">Loading…</span></div>;
   if (!auth.user) {
     return (
       <div className="auth-wrap">
         <div className="auth-card">
           <div className="brand"><span className="logo">O</span> Omniflow</div>
-          <p className="tagline">Выплаты в стейблкоинах: организация платит многим людям, каждый получает так, как удобно ему.</p>
+          <p className="tagline">Stablecoin payouts: an organization pays many people, and each one receives the way that suits them.</p>
           <div className="card">
-            <LoginForm title="Вход в кабинет" />
+            <LoginForm title="Sign in to the dashboard" />
           </div>
-          {DEV && <p className="hint" style={{ textAlign: "center", marginTop: 16 }}><a href="#/dev/mailbox">Открыть dev-ящик</a> — там коды входа</p>}
+          {DEV && <p className="hint" style={{ textAlign: "center", marginTop: 16 }}><a href="#/dev/mailbox">Open the dev mailbox</a> — login codes arrive there</p>}
         </div>
       </div>
     );
@@ -108,15 +108,15 @@ function Shell() {
         <div className="topbar-inner">
           <Brand />
           <div className="spacer" />
-          {DEV && <a href="#/dev/mailbox" className="chip">dev-ящик</a>}
+          {DEV && <a href="#/dev/mailbox" className="chip">dev mailbox</a>}
           <div className="userchip">
             <span className="avatar">{email.slice(0, 1).toUpperCase()}</span>
             <span className="who" data-testid="me">
               <span>{auth.user.email}</span>
-              <span className="mono small muted">{auth.user.wallet ? `${auth.user.wallet.slice(0, 6)}…${auth.user.wallet.slice(-4)}` : "без кошелька"}</span>
+              <span className="mono small muted">{auth.user.wallet ? `${auth.user.wallet.slice(0, 6)}…${auth.user.wallet.slice(-4)}` : "no wallet"}</span>
             </span>
           </div>
-          <button className="ghost sm" onClick={() => auth.logout()}>Выйти</button>
+          <button className="ghost sm" onClick={() => auth.logout()}>Sign out</button>
         </div>
       </header>
       <main className="content">{page}</main>

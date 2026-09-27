@@ -89,13 +89,13 @@ describe.skipIf(!DB_URL)("the application through the browser", () => {
     if (screenshot) await shot(page, screenshot);
     await page.getByTestId("sign-confirm").click();
   }
-  const pendingMails = async () => (await mail(a1)).filter((m) => /ждёт вашего подтверждения/.test(m.subject)).length;
+  const pendingMails = async () => (await mail(a1)).filter((m) => /waiting for your approval/.test(m.subject)).length;
   /** Clicks what creates a batch, waits for its "waiting for your approval" letter; a1 approves, a2 signs last and sends. */
   async function approveBoth(page: Page, button: string) {
     const before = await pendingMails();
     await page.getByTestId(button).click();
     await expect.poll(pendingMails, { timeout: 15_000 }).toBeGreaterThan(before);
-    const url = await linkIn(a1, /ждёт вашего подтверждения/, stack.urls.web);
+    const url = await linkIn(a1, /waiting for your approval/, stack.urls.web);
     const p1 = pages[a1]!;
     await p1.goto(url);
     await p1.getByTestId("sign").waitFor();
@@ -103,7 +103,7 @@ describe.skipIf(!DB_URL)("the application through the browser", () => {
     await p1.getByTestId("done").waitFor();
     const p2 = pages[a2]!;
     await p2.goto(url);
-    await expect.poll(() => p2.getByTestId("sign").textContent()).toBe("Подписать и отправить");
+    await expect.poll(() => p2.getByTestId("sign").textContent()).toBe("Sign and send");
     await signIn(p2, "sign");
     await p2.getByTestId("closed").waitFor({ timeout: 30_000 });
   }
@@ -163,12 +163,12 @@ describe.skipIf(!DB_URL)("the application through the browser", () => {
     await p.getByTestId("setup-start").click();
     await p.getByTestId("setup-view").waitFor();
 
-    setupUrl = await linkIn(a1, /назначили подтверждающим/, stack.urls.web);
+    setupUrl = await linkIn(a1, /named a payout approver/, stack.urls.web);
     for (const e of [a1, a2]) {
       const page = await person(e);
       await page.goto(setupUrl);
       await page.getByTestId("setup-join").click();
-      await expect.poll(() => page.getByText("ещё не вошёл").count()).toBeLessThan(2);
+      await expect.poll(() => page.getByText("not signed in yet").count()).toBeLessThan(2);
     }
     for (const e of [a1, a2]) {
       const page = pages[e]!;
@@ -178,7 +178,7 @@ describe.skipIf(!DB_URL)("the application through the browser", () => {
       await signIn(page, "setup-confirm", e === a1 ? "sign-modal" : undefined);
     }
     const last = pages[a2]!;
-    await expect.poll(() => last.getByTestId("setup-status").textContent(), { timeout: 30_000 }).toContain("аккаунт создан");
+    await expect.poll(() => last.getByTestId("setup-status").textContent(), { timeout: 30_000 }).toContain("account created");
     account = (await last.getByTestId("setup-account").textContent()) as Address;
     expect(await stack.api.chain.pub.getCode({ address: account })).not.toBe("0x");
     await shot(last, "setup-deployed");
@@ -217,37 +217,37 @@ describe.skipIf(!DB_URL)("the application through the browser", () => {
     await p.getByTestId("payout-create").click();
     await p.getByTestId("review").waitFor();
     payoutUrl = p.url();
-    expect(await text(p, "review")).toContain("2 строк");
+    expect(await text(p, "review")).toContain("2 rows");
     await shot(p, "payout-review");
     await p.getByTestId("freeze").click();
-    await expect.poll(async () => (await mail(a1)).some((m) => /ждёт вашего подтверждения/.test(m.subject))).toBe(true);
+    await expect.poll(async () => (await mail(a1)).some((m) => /waiting for your approval/.test(m.subject))).toBe(true);
   });
 
   it("2 of 2 in the cabinet: approve, then the final signature sends it", async () => {
-    approveUrlSeen = await linkIn(a1, /ждёт вашего подтверждения/, stack.urls.web);
+    approveUrlSeen = await linkIn(a1, /waiting for your approval/, stack.urls.web);
     const p1 = pages[a1]!;
     await p1.goto(approveUrlSeen);
-    await expect.poll(() => text(p1, "what")).toContain("1 250 USDC"); // ru-RU groups thousands with a no-break space
+    await expect.poll(() => text(p1, "what")).toContain("1,250 USDC");
     await shot(p1, "approve");
     await signIn(p1, "sign");
     await p1.getByTestId("done").waitFor();
 
     const p2 = pages[a2]!;
     await p2.goto(approveUrlSeen);
-    await expect.poll(() => p2.getByTestId("sign").textContent()).toBe("Подписать и отправить");
+    await expect.poll(() => p2.getByTestId("sign").textContent()).toBe("Sign and send");
     await signIn(p2, "sign");
     await p2.getByTestId("closed").waitFor({ timeout: 30_000 });
     await expect.poll(() => balance(alice), { timeout: 30_000 }).toBe(1_000_000_000n);
 
     const o = pages[ops]!;
     await o.goto(payoutUrl);
-    await expect.poll(() => statusOf(o, "Carol"), { timeout: 30_000 }).toBe("по ссылке, не получено");
-    expect(await text(o, "status-Alice")).toBe("отправлено");
+    await expect.poll(() => statusOf(o, "Carol"), { timeout: 30_000 }).toBe("link sent, not claimed");
+    expect(await text(o, "status-Alice")).toBe("sent");
     await shot(o, "payout-sent");
   });
 
   it("Carol opens the emailed link, logs in by email and receives into her embedded wallet", async () => {
-    const link = await linkIn("carol@example.test", /вам отправлен платёж/, stack.urls.claim);
+    const link = await linkIn("carol@example.test", /you have been sent a payment/, stack.urls.claim);
     lastClaimUrl = link;
     const page = await newPage();
     const requests: string[] = [];
@@ -266,9 +266,9 @@ describe.skipIf(!DB_URL)("the application through the browser", () => {
     const key = link.split("k=")[1]!.split("&")[0]!.replace(/^0x/, "");
     expect(requests.some((u) => u.includes(key))).toBe(false);
     await page.reload();
-    await expect.poll(() => page.getByTestId("status").textContent()).toBe("Платёж уже получен.");
+    await expect.poll(() => page.getByTestId("status").textContent()).toBe("This payment has already been claimed.");
     const o = pages[ops]!;
-    await expect.poll(() => statusOf(o, "Carol"), { timeout: 30_000 }).toBe("получено");
+    await expect.poll(() => statusOf(o, "Carol"), { timeout: 30_000 }).toBe("claimed");
   });
 
   it("Dave gets a details form link and fills in his address; the row becomes ready", async () => {
@@ -282,7 +282,7 @@ describe.skipIf(!DB_URL)("the application through the browser", () => {
     await page.getByTestId("form-address").fill(daveWallet);
     await page.getByTestId("form-submit").click();
     await page.getByTestId("form-done").waitFor();
-    await expect.poll(() => statusOf(o, "Dave")).toBe("готова");
+    await expect.poll(() => statusOf(o, "Dave")).toBe("ready");
   });
 
   // ------------------------------------------------------------------ the rest of the cabinet
@@ -304,8 +304,8 @@ describe.skipIf(!DB_URL)("the application through the browser", () => {
     await p.getByTestId("book-payout").click();
     await p.getByTestId("review").waitFor();
     expect(await text(p, "payout-title")).toBe("October from the book");
-    expect(await text(p, "review")).toContain("1 500 USDC");
-    expect(await text(p, "review")).toContain("Сумма изменилась"); // Alice 1000 → 1200, seen against history
+    expect(await text(p, "review")).toContain("1,500 USDC");
+    expect(await text(p, "review")).toContain("Amount changed"); // Alice 1000 → 1200, seen against history
   });
 
   it("repeat a payout with edits: change an amount, add a row, remove a row", async () => {
@@ -317,7 +317,7 @@ describe.skipIf(!DB_URL)("the application through the browser", () => {
     await p.getByTestId("row-amount-Alice").fill("1500");
     await shot(p, "payout-edit-row");
     await p.getByTestId("row-save-Alice").click();
-    await expect.poll(() => text(p, "rows")).toContain("1 500 USDC");
+    await expect.poll(() => text(p, "rows")).toContain("1,500 USDC");
     const gina = privateKeyToAccount(generatePrivateKey()).address;
     await p.getByTestId("add-name").fill("Gina");
     await p.getByTestId("add-address").fill(gina);
@@ -335,15 +335,15 @@ describe.skipIf(!DB_URL)("the application through the browser", () => {
     await p.getByTestId("every").selectOption("week");
     await p.getByTestId("schedule").click();
     await p.getByTestId("schedule-state-September").waitFor();
-    expect(await text(p, "schedule-state-September")).toBe("активно");
+    expect(await text(p, "schedule-state-September")).toBe("active");
     await shot(p, "schedules");
     await p.getByTestId("schedule-toggle-September").click();
-    await expect.poll(() => text(p, "schedule-state-September")).toBe("на паузе");
+    await expect.poll(() => text(p, "schedule-state-September")).toBe("paused");
     await p.getByTestId("schedule-toggle-September").click();
-    await expect.poll(() => text(p, "schedule-state-September")).toBe("активно");
+    await expect.poll(() => text(p, "schedule-state-September")).toBe("active");
   });
 
-  it("in the cabinet: new links for one unclaimed payment, revoke another; then close the payout", async () => {
+  it("in the dashboard: new links for one unclaimed payment, revoke another; then close the payout", async () => {
     const p = pages[ops]!;
     const chainId = stack.chain.chainId;
     await p.goto(`${orgUrl}/payouts`);
@@ -355,24 +355,24 @@ describe.skipIf(!DB_URL)("the application through the browser", () => {
     const stipends = p.url();
     await approveBoth(p, "freeze");
     await p.goto(stipends);
-    await expect.poll(() => statusOf(p, "Hana"), { timeout: 30_000 }).toBe("по ссылке, не получено");
-    const oldLink = await linkIn("hana@example.test", /вам отправлен платёж/, stack.urls.claim);
+    await expect.poll(() => statusOf(p, "Hana"), { timeout: 30_000 }).toBe("link sent, not claimed");
+    const oldLink = await linkIn("hana@example.test", /you have been sent a payment/, stack.urls.claim);
 
     await p.getByTestId("pick-Hana").check();
     await shot(p, "payout-picked");
     await approveBoth(p, "rekey");
-    await expect.poll(async () => (await mail("hana@example.test"))[0]!.subject, { timeout: 30_000 }).toMatch(/новая ссылка на ваш платёж/);
-    expect(await linkIn("hana@example.test", /новая ссылка/, stack.urls.claim)).not.toBe(oldLink);
+    await expect.poll(async () => (await mail("hana@example.test"))[0]!.subject, { timeout: 30_000 }).toMatch(/a new link to your payment/);
+    expect(await linkIn("hana@example.test", /a new link/, stack.urls.claim)).not.toBe(oldLink);
 
     await p.goto(stipends);
-    await expect.poll(() => statusOf(p, "Ivan")).toBe("по ссылке, не получено");
+    await expect.poll(() => statusOf(p, "Ivan")).toBe("link sent, not claimed");
     await p.getByTestId("pick-Ivan").check();
     await approveBoth(p, "revoke");
     await p.goto(stipends);
-    await expect.poll(() => statusOf(p, "Ivan"), { timeout: 30_000 }).toBe("возвращено");
+    await expect.poll(() => statusOf(p, "Ivan"), { timeout: 30_000 }).toBe("returned");
 
     await p.getByTestId("close").click();
-    await expect.poll(() => text(p, "payout-status")).toBe("закрыта");
+    await expect.poll(() => text(p, "payout-status")).toBe("closed");
   });
 
   it("members: the admin invites an operator and removes them again", async () => {
@@ -381,7 +381,7 @@ describe.skipIf(!DB_URL)("the application through the browser", () => {
     await p.getByTestId("invite-email").fill("ops2@acme.test");
     await p.getByTestId("invite").click();
     await p.getByTestId("member-ops2@acme.test").waitFor();
-    expect((await mail("ops2@acme.test"))[0]!.subject).toMatch(/приглашение/);
+    expect((await mail("ops2@acme.test"))[0]!.subject).toMatch(/invitation/);
     await shot(p, "members");
     await p.getByTestId("remove-ops2@acme.test").click();
     await expect.poll(() => p.getByTestId("member-ops2@acme.test").count()).toBe(0);
@@ -395,8 +395,8 @@ describe.skipIf(!DB_URL)("the application through the browser", () => {
     await p.getByTestId("settings-saved").waitFor();
     await shot(p, "settings");
     await p.goto(`${orgUrl}/audit`);
-    await expect.poll(() => text(p, "audit-table")).toContain("настройки изменены");
-    for (const t of ["аккаунт создан", "выплата создана", "подпись", "отправлено в сеть", "приглашён оператор", "оператор убран", "выплата закрыта"]) expect(await text(p, "audit-table")).toContain(t);
+    await expect.poll(() => text(p, "audit-table")).toContain("settings changed");
+    for (const t of ["account created", "payout created", "signed", "submitted on chain", "operator invited", "operator removed", "payout closed"]) expect(await text(p, "audit-table")).toContain(t);
     await shot(p, "audit");
     const a = pages[a1]!;
     await a.goto(`${orgUrl}/settings`);
@@ -411,7 +411,7 @@ describe.skipIf(!DB_URL)("the application through the browser", () => {
     await shot(p, "reports");
     const [download] = await Promise.all([p.waitForEvent("download"), p.getByTestId("csv").click()]);
     const csv = readFileSync((await download.path())!, "utf8");
-    expect(csv.split("\n")[0]).toContain("Дата");
+    expect(csv.split("\n")[0]).toContain("Date");
     expect(csv).toContain("Alice");
     expect(download.suggestedFilename()).toBe("omniflow-Acme-payments.csv");
   });

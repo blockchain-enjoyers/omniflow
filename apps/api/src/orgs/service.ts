@@ -104,8 +104,8 @@ export class OrgService {
     for (const a of approvers) {
       await this.mailer.send({
         to: a.email,
-        subject: `${input.name}: вас назначили подтверждающим выплат`,
-        text: `${u.email} создаёт аккаунт организации «${input.name}» в Omniflow и назначил вас подтверждающим.\nВойдите по этой почте и подтвердите состав: ${this.dep.appUrl}#/setup/${id}\n\nНикто, кроме подтверждающих, не сможет отправить деньги с этого аккаунта.`,
+        subject: `${input.name}: you have been named a payout approver`,
+        text: `${u.email} is creating the organization account "${input.name}" in Omniflow and named you an approver.\nSign in with this email and confirm the set of approvers: ${this.dep.appUrl}#/setup/${id}\n\nNo one but the approvers will be able to send money from this account.`,
       });
     }
     await this.audit(null, u.did, "setup.started", { setupId: id, name: input.name });
@@ -251,7 +251,7 @@ export class OrgService {
     );
     await this.db.query(`UPDATE org_members m SET did=u.did, status='active' FROM users u WHERE m.org_id=$1 AND m.email=$2 AND u.email=$2`, [orgId, e]);
     const org = (await this.db.query(`SELECT name FROM orgs WHERE id=$1`, [orgId])).rows[0];
-    await this.mailer.send({ to: e, subject: `${org.name}: приглашение в Omniflow`, text: `Вас пригласили оператором выплат организации «${org.name}». Войдите по этой почте: ${this.dep.appUrl}` });
+    await this.mailer.send({ to: e, subject: `${org.name}: invitation to Omniflow`, text: `You have been invited as a payout operator of "${org.name}". Sign in with this email: ${this.dep.appUrl}` });
     await this.audit(orgId, u.did, "member.invited", { email: e, role: "operator" });
   }
 

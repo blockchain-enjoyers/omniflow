@@ -71,7 +71,7 @@ export class ListService {
     if (!p) throw new HttpError(404, "payout not found");
     const src = (await this.db.query(`SELECT * FROM payout_rows WHERE payout_id=$1 ORDER BY row_key`, [payoutId])).rows;
     const rows: PayoutRow[] = src.map((r, i) => ({ rowId: `row-${i + 2}`, name: r.name, email: r.email ?? undefined, address: r.address ?? undefined, chainId: r.chain_id, amount: BigInt(r.amount), category: r.category ?? undefined }));
-    return this.payouts.createPayoutFromRows(p.org_id, { title: title ?? `${p.title} (повтор)`, rows, autoRefundDays: p.auto_refund_days, source: "repeat", scheduleId });
+    return this.payouts.createPayoutFromRows(p.org_id, { title: title ?? `${p.title} (repeat)`, rows, autoRefundDays: p.auto_refund_days, source: "repeat", scheduleId });
   }
 
   /** Edit a row while it is not in a batch yet. After freezing, a row can no longer change. */
@@ -143,7 +143,7 @@ export class ListService {
       created.push(p.id);
       const ops = (await this.db.query(`SELECT m.email, o.name FROM org_members m JOIN orgs o ON o.id=m.org_id WHERE m.org_id=$1 AND 'operator'=ANY(m.roles) AND m.status<>'removed'`, [s.org_id])).rows;
       for (const o of ops) {
-        await this.mailer.send({ to: o.email, subject: `${o.name}: черновик регулярной выплаты «${s.title}» готов к проверке`, text: `Создан черновик по расписанию. Проверьте и отправьте на подтверждение: ${this.appUrl}#/payout/${p.id}` });
+        await this.mailer.send({ to: o.email, subject: `${o.name}: the recurring payout "${s.title}" has a draft ready for review`, text: `A scheduled draft was created. Review it and send it for approval: ${this.appUrl}#/payout/${p.id}` });
       }
     }
     return created;

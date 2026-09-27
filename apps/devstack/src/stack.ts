@@ -90,7 +90,7 @@ export async function startStack(o: StackOptions): Promise<RunningStack> {
   const servers: Server[] = [];
   const children: { kill(): void }[] = [];
 
-  log(o.fork ? "anvil: форк Arbitrum Sepolia, развёртывание эскроу и paymaster…" : "anvil: локальная сеть, развёртывание стека из исходников…");
+  log(o.fork ? "anvil: Arbitrum Sepolia fork, deploying escrow and paymaster…" : "anvil: local chain, deploying the stack from source…");
   const chain = await startDevStack({ fork: o.fork, forkUrl: o.forkUrl, port: p.anvil || undefined, contractsDir: CONTRACTS });
   const db = await prepareDatabase(o.databaseUrl);
 
@@ -121,7 +121,7 @@ export async function startStack(o: StackOptions): Promise<RunningStack> {
 
     let zerodevUrl: string | null = null;
     if ((o.aa ?? "zerodev") === "zerodev") {
-      log("бандлер Alto и эмулятор RPC ZeroDev…");
+      log("Alto bundler and ZeroDev RPC emulator…");
       const alto = await startAlto(chain.rpcUrl, chain.entryPoint, { port: p.bundler || undefined });
       children.push(alto.process);
       const zdApp = express();
@@ -145,10 +145,10 @@ export async function startStack(o: StackOptions): Promise<RunningStack> {
     await api.app.listen(p.api);
     const apiUrl = `http://${host}:${(api.app.getHttpServer().address() as AddressInfo).port}`;
 
-    log("сборка кабинета и страницы клейма…");
+    log("building the dashboard and the claim page…");
     webApp.use(
       express.static(
-        buildFrontend("web", { VITE_API_URL: apiUrl, VITE_PRIVY_EMULATOR_URL: privyUrl, VITE_PRIVY_APP_ID: "", VITE_DEV_TOOLS: "1", VITE_CHAIN_NAME: o.fork ? "Arbitrum Sepolia (форк)" : "локальная сеть" }),
+        buildFrontend("web", { VITE_API_URL: apiUrl, VITE_PRIVY_EMULATOR_URL: privyUrl, VITE_PRIVY_APP_ID: "", VITE_DEV_TOOLS: "1", VITE_CHAIN_NAME: o.fork ? "Arbitrum Sepolia (fork)" : "local chain" }),
       ),
     );
     claimApp.use(

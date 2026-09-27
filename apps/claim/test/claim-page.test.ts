@@ -96,12 +96,12 @@ describe("claim page without Omniflow", () => {
 
     // Reopening the used link says so.
     await page.reload();
-    await expect.poll(async () => page.getByTestId("status").textContent()).toBe("Платёж уже получен.");
+    await expect.poll(async () => page.getByTestId("status").textContent()).toBe("This payment has already been claimed.");
   });
 
   it("a broken link is reported, not crashed", async () => {
     const page = await browser.newPage();
     await page.goto(`http://127.0.0.1:${port}/#c=1&e=0x1`);
-    await expect.poll(async () => page.locator("h1").textContent()).toBe("Ссылка повреждена");
+    await expect.poll(async () => page.locator("h1").textContent()).toBe("This link is broken");
   });
 });

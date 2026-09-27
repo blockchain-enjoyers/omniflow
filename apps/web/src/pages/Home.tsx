@@ -2,7 +2,7 @@ import { useAuth } from "@omniflow/auth-client";
 import { call, type Me } from "../api";
 import { Addr, Badge, chainName, Err, Section, useLoad } from "../ui";
 
-const ROLE: Record<string, string> = { admin: "администратор", operator: "оператор", approver: "подтверждающий" };
+const ROLE: Record<string, string> = { admin: "admin", operator: "operator", approver: "approver" };
 
 export function Home() {
   const auth = useAuth();
@@ -11,21 +11,21 @@ export function Home() {
     <>
       <div className="page-head">
         <div>
-          <h1>Организации</h1>
-          <div className="sub">Аккаунты, с которых вы платите или подтверждаете выплаты.</div>
+          <h1>Organizations</h1>
+          <div className="sub">Accounts you pay from or approve payouts for.</div>
         </div>
-        <a className="btn" href="#/setup/new" data-testid="new-org">+ Создать организацию</a>
+        <a className="btn" href="#/setup/new" data-testid="new-org">+ New organization</a>
       </div>
 
       {!!me.data?.setups.length && (
-        <Section title="Ждут вашего участия" desc="Аккаунт появится, когда все подтверждающие войдут и подпишут состав." testid="setups">
+        <Section title="Waiting for you" desc="The account is created once every approver has signed in and signed the approver set." testid="setups">
           <ul className="check-list">
             {me.data.setups.map((s) => (
               <li key={s.id}>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <a href={`#/setup/${s.id}`} data-testid={`setup-${s.name}`} className="cell-main">{s.name}</a>
                   <span className="cell-sub hint">
-                    {s.joined === false ? "Вы ещё не присоединились" : s.joined && s.confirmed === false ? "Ждёт вашей подписи состава" : "Ждём остальных"}
+                    {s.joined === false ? "You have not joined yet" : s.joined && s.confirmed === false ? "Waiting for your signature on the approver set" : "Waiting for the others"}
                   </span>
                 </div>
                 <Badge s={s.status} />
@@ -37,8 +37,8 @@ export function Home() {
 
       {me.data && me.data.orgs.length === 0 && (
         <section className="card empty" data-testid="orgs">
-          <h2 style={{ marginBottom: 8 }}>Пока нет ни одной организации</h2>
-          <p className="hint">Создайте аккаунт организации: назначьте подтверждающих, и только они смогут отправлять с него деньги.</p>
+          <h2 style={{ marginBottom: 8 }}>No organizations yet</h2>
+          <p className="hint">Create an organization account: name its approvers — only they will be able to send money from it.</p>
         </section>
       )}
       {!!me.data?.orgs.length && (

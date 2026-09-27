@@ -19,31 +19,31 @@ const stack = await startStack({ databaseUrl, fork: process.env.STACK === "fork"
 
 let demo: Awaited<ReturnType<typeof seedDemo>> | null = null;
 if (process.env.SEED !== "0") {
-  log(`демо: организация «${DEMO.org}», ${DEMO.threshold} из ${DEMO.approvers.length}…`);
+  log(`demo: organisation "${DEMO.org}", ${DEMO.threshold} of ${DEMO.approvers.length}…`);
   demo = await seedDemo(stack);
 }
 
 console.log(`
-Omniflow — всё эмулировано (Privy, ZeroDev, почта, он-рамп, сеть). Не Privy, не ZeroDev, не мейннет.
+Omniflow — everything is emulated (Privy, ZeroDev, mail, on-ramp, chain). Not Privy, not ZeroDev, not mainnet.
 
-  кабинет         ${stack.urls.web}
-  страница клейма ${stack.urls.claim}
-  dev-ящик        ${stack.urls.web}/#/dev/mailbox   ← коды входа и все письма
-  API             ${stack.urls.api}
-  эмулятор Privy  ${stack.urls.privy}
-  эмулятор он-рампа ${stack.urls.onramp}
-  RPC ZeroDev (эмулятор) ${stack.urls.zerodev ?? "— API сам отправляет операции (AA=self)"}
-  сеть (anvil)    ${stack.urls.rpc}  chainId ${stack.chain.chainId}
+  dashboard          ${stack.urls.web}
+  claim page         ${stack.urls.claim}
+  dev mailbox        ${stack.urls.web}/#/dev/mailbox   ← login codes and every email
+  API                ${stack.urls.api}
+  Privy emulator     ${stack.urls.privy}
+  on-ramp emulator   ${stack.urls.onramp}
+  ZeroDev RPC (emu)  ${stack.urls.zerodev ?? "— the API sends operations itself (AA=self)"}
+  chain (anvil)      ${stack.urls.rpc}  chainId ${stack.chain.chainId}
 ${
   demo
     ? `
-  демо «${DEMO.org}»: аккаунт ${demo.account}, ${Number(DEMO.usdc) / 1e6} тестовых USDC
-    оператор/админ   ${DEMO.operator}
-    подтверждающие   ${DEMO.approvers.join(", ")}  (порог ${DEMO.threshold})
-    вход: почта → код из dev-ящика`
+  demo "${DEMO.org}": account ${demo.account}, ${Number(DEMO.usdc) / 1e6} test USDC
+    operator/admin   ${DEMO.operator}
+    approvers        ${DEMO.approvers.join(", ")}  (threshold ${DEMO.threshold})
+    sign in: email → code from the dev mailbox`
     : ""
 }
-Ctrl+C — остановить.`);
+Ctrl+C — stop.`);
 
 const stop = async () => {
   await stack.stop();

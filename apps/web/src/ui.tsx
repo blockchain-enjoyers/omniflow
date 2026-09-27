@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { formatUnits } from "viem";
 
-export const usdc = (units: string | bigint) => `${Number(formatUnits(BigInt(units), 6)).toLocaleString("ru-RU", { maximumFractionDigits: 6 })} USDC`;
-const CHAINS: Record<number, string> = { 42161: "Arbitrum One", 421614: "Arbitrum Sepolia (тестовая)", 31337: "локальная сеть (anvil)" };
-export const chainName = (id: number) => CHAINS[id] ?? `сеть ${id}`;
+export const usdc = (units: string | bigint) => `${Number(formatUnits(BigInt(units), 6)).toLocaleString("en-US", { maximumFractionDigits: 6 })} USDC`;
+const CHAINS: Record<number, string> = { 42161: "Arbitrum One", 421614: "Arbitrum Sepolia (testnet)", 31337: "local chain (anvil)" };
+export const chainName = (id: number) => CHAINS[id] ?? `chain ${id}`;
 export const short = (a?: string | null) => (a ? `${a.slice(0, 6)}…${a.slice(-4)}` : "—");
-export const date = (s: string) => new Date(s).toLocaleDateString("ru-RU", { day: "numeric", month: "short", year: "numeric" });
-export const dateTime = (s: string) => new Date(s).toLocaleString("ru-RU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+export const date = (s: string) => new Date(s).toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric" });
+export const dateTime = (s: string) => new Date(s).toLocaleString("en-US", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 
 export function useLoad<T>(fn: () => Promise<T>, deps: unknown[]) {
   const [data, setData] = useState<T | null>(null);
@@ -65,10 +65,10 @@ export function Section({ title, desc, actions, children, testid, flush }: { tit
 }
 
 const STATUS: Record<string, [string, string]> = {
-  draft: ["черновик", ""], confirming: ["на подтверждении", "warn"], partially_executed: ["частично исполнена", "warn"], closed: ["закрыта", ""],
-  waiting_details: ["ждёт реквизитов", "warn"], other_chain: ["другая сеть — не уйдёт", "bad"], ready: ["готова", "accent"], in_batch: ["в партии", "info"],
-  sent: ["отправлено", "ok"], in_escrow: ["по ссылке, не получено", "info"], claimed: ["получено", "ok"], refunded: ["возвращено", ""], failed: ["не прошла", "bad"],
-  collecting: ["собираем подписи", "warn"], submitted: ["отправлена в сеть", "info"], mined: ["исполнена", "ok"], deployed: ["создан", "ok"],
+  draft: ["draft", ""], confirming: ["awaiting approval", "warn"], partially_executed: ["partially executed", "warn"], closed: ["closed", ""],
+  waiting_details: ["needs details", "warn"], other_chain: ["other chain — won't be sent", "bad"], ready: ["ready", "accent"], in_batch: ["in batch", "info"],
+  sent: ["sent", "ok"], in_escrow: ["link sent, not claimed", "info"], claimed: ["claimed", "ok"], refunded: ["returned", ""], failed: ["failed", "bad"],
+  collecting: ["collecting signatures", "warn"], submitted: ["submitted", "info"], mined: ["executed", "ok"], deployed: ["deployed", "ok"],
 };
 export const status = (s: string) => STATUS[s]?.[0] ?? s;
 export const Badge = ({ s, testid, extra }: { s: string; testid?: string; extra?: string }) => (
@@ -84,7 +84,7 @@ export function Addr({ value, full, testid }: { value?: string | null; full?: bo
       <span className="v" data-testid={testid}>{full ? value : short(value)}</span>
       <button
         type="button"
-        aria-label="Скопировать"
+        aria-label="Copy"
         onClick={() => {
           void navigator.clipboard?.writeText(value).then(() => {
             setCopied(true);

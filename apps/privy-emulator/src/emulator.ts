@@ -78,7 +78,7 @@ export class PrivyEmulator {
        ON CONFLICT (email) DO UPDATE SET code=EXCLUDED.code, expires_at=EXCLUDED.expires_at, attempts=0`,
       [e, code],
     );
-    await sendToDevMailbox(this.db, { to: e, fromName: "Privy (эмулятор)", subject: `Код входа: ${code}`, text: `Ваш код входа: ${code}. Действует 10 минут.` });
+    await sendToDevMailbox(this.db, { to: e, fromName: "Privy (emulator)", subject: `Login code: ${code}`, text: `Your login code: ${code}. Valid for 10 minutes.` });
   }
 
   async verifyEmailLogin(email: string, code: string) {
