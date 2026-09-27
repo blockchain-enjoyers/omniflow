@@ -10,6 +10,7 @@ import {
   callDataAndNonceHash,
   claimTypedData,
   depositId,
+  kernelInitData,
   signClaim,
   type BatchManifest,
 } from "../src/index.js";
@@ -78,6 +79,8 @@ async function build() {
     claimDeadline: deadline.toString(),
     claimDigest: hashTypedData(claimTypedData(link, recipient, deadline)),
     claimSignature: await signClaim(link, recipient, deadline),
+    initApprovers: [A(0x111), A(0x333), A(0x222)],
+    initData: kernelInitData(validator, { approvers: [A(0x111), A(0x333), A(0x222)].map((address) => ({ address, weight: 1 })), threshold: 2 }),
   };
 }
 

@@ -4,6 +4,8 @@ pragma solidity 0.8.28;
 import {Test} from "forge-std/Test.sol";
 import {stdJson} from "forge-std/StdJson.sol";
 import {Kernel} from "kernel/Kernel.sol";
+import {IHook, IValidator} from "kernel/interfaces/IERC7579Modules.sol";
+import {ValidatorLib} from "kernel/utils/ValidationTypeLib.sol";
 import {ExecLib} from "kernel/utils/ExecLib.sol";
 import {Execution} from "kernel/types/Structs.sol";
 import {ExecMode, ExecModePayload} from "kernel/types/Types.sol";
@@ -87,6 +89,27 @@ contract SharedFixtureTest is Test {
         (bytes32 r, bytes32 s) = abi.decode(sig, (bytes32, bytes32));
         uint8 v = uint8(sig[64]);
         assertEq(ecrecover(digest, v, r, s), json.readAddress(".approver"));
+    }
+
+    /// TS kernelInitData == Kernel.initialize(validatorToIdentifier(v), hook 0, abi.encode(sortedDesc, weights, threshold, 0), "", []).
+    function test_kernelInitDataMatches() public view {
+        address[] memory sorted = new address[](3);
+        sorted[0] = address(0x333);
+        sorted[1] = address(0x222);
+        sorted[2] = address(0x111);
+        uint24[] memory weights = new uint24[](3);
+        weights[0] = 1;
+        weights[1] = 1;
+        weights[2] = 1;
+        bytes memory expected = abi.encodeWithSelector(
+            Kernel.initialize.selector,
+            ValidatorLib.validatorToIdentifier(IValidator(json.readAddress(".validator"))),
+            IHook(address(0)),
+            abi.encode(sorted, weights, uint24(2), uint48(0)),
+            hex"",
+            new bytes[](0)
+        );
+        assertEq(json.readBytes(".initData"), expected);
     }
 
     /// A claim signed in TypeScript with the key from the link is redeemed by the real ClaimEscrow.

@@ -5,3 +5,4 @@ export * from "./batch.js";
 export * from "./approval.js";
 export * from "./claim.js";
 export * from "./review.js";
+export * from "./account.js";
