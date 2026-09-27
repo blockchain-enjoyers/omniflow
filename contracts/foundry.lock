@@ -5,6 +5,12 @@
       "rev": "bf647bd6046f2f7da30d0c2bf435e5c76a780c1b"
     }
   },
+  "lib/kernel": {
+    "tag": {
+      "name": "v3.3",
+      "rev": "cd697c7e21715d015e0643af22310a99aa17433b"
+    }
+  },
   "lib/solady": {
     "tag": {
       "name": "v0.1.26",
