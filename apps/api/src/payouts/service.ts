@@ -32,10 +32,11 @@ import { withGas } from "../chain/bundler.js";
 const STUB_FINAL_SIGNATURE: Hex =
   "0xfffffffffffffffffffffffffffffff0000000000000000000000000000000007aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1c";
 import type { Mailer } from "../mail/mailer.js";
-import { parsePayoutCsv } from "./csv.js";
+import { parsePayoutCsv, validateRow, type CsvProblem, type RowInput } from "./csv.js";
 
 export class HttpError extends Error {
-  constructor(readonly status: number, message: string) {
+  /** details: machine-readable problems the UI shows next to the fields (e.g. CSV lines) */
+  constructor(readonly status: number, message: string, readonly details?: unknown) {
     super(message);
   }
 }
@@ -97,15 +98,37 @@ export class PayoutService {
 
   // --------------------------------------------------------------- payouts
 
-  async createPayout(orgId: string, input: { title: string; csv: string; autoRefundDays?: number | null }) {
-    const { rows, errors } = parsePayoutCsv(input.csv, this.cfg.tokenDecimals);
-    if (errors.length) throw new HttpError(400, JSON.stringify(errors));
-    return this.createPayoutFromRows(orgId, { ...input, rows, source: "csv" });
+  /** Rows from a file or pasted cells, or typed by hand — checked the same way; nothing is saved (the import preview). */
+  async parseRows(orgId: string, input: { csv?: string; rows?: RowInput[] }) {
+    const org = await this.org(orgId);
+    if (input.rows) {
+      const errors: CsvProblem[] = [];
+      const rows: PayoutRow[] = [];
+      input.rows.forEach((r, i) => {
+        const v = validateRow(r, i + 1, this.cfg.tokenDecimals, org.chain_id);
+        errors.push(...v.errors);
+        if (v.row) rows.push({ ...v.row, rowId: `row-${i + 2}` });
+      });
+      return { rows, errors, warnings: [] as CsvProblem[], chainId: org.chain_id };
+    }
+    const r = parsePayoutCsv(input.csv ?? "", this.cfg.tokenDecimals, org.chain_id);
+    return { rows: r.rows as PayoutRow[], errors: r.errors, warnings: r.warnings, chainId: org.chain_id };
+  }
+
+  async createPayout(orgId: string, input: { title: string; csv?: string; rows?: RowInput[]; autoRefundDays?: number | null }) {
+    const { rows, errors } = await this.parseRows(orgId, input);
+    if (errors.length) throw new HttpError(400, `${errors.length} problem(s) in the rows — fix them and try again`, { problems: errors });
+    return this.createPayoutFromRows(orgId, { title: input.title, autoRefundDays: input.autoRefundDays, rows, source: input.rows ? "manual" : "csv" });
   }
 
   async createPayoutFromRows(orgId: string, input: { title: string; rows: PayoutRow[]; autoRefundDays?: number | null; source: string; scheduleId?: string }) {
     const org = await this.org(orgId);
     const rows = input.rows;
+    const title = (input.title ?? "").trim();
+    if (!title) throw new HttpError(400, "give the payout a title");
+    if (title.length > 120) throw new HttpError(400, "the title is too long (120 characters at most)");
+    if (!rows.length) throw new HttpError(400, "add at least one row");
+    input = { ...input, title };
     return tx(this.db, async (c) => {
       const p = await c.query(`INSERT INTO payouts (org_id, title, auto_refund_days, schedule_id) VALUES ($1,$2,$3,$4) RETURNING id`, [
         orgId,
@@ -288,9 +311,10 @@ export class PayoutService {
     const me = org.approvers.find((a) => a.address === getAddress(approver));
     if (!me) throw new HttpError(403, "not an approver of this organisation");
     // A batch that is no longer collecting must not get a new op draft — that would overwrite the record.
-    if (batch.status !== "collecting") return { step: "closed" as const, status: batch.status as string };
+    const payoutId = (batch.manifest as { payoutId: string }).payoutId;
+    if (batch.status !== "collecting") return { step: "closed" as const, status: batch.status as string, payoutId };
     const signed = await this.approvals(batchId);
-    if (signed.some((s) => s.approver === me.address)) return { step: "done" as const };
+    if (signed.some((s) => s.approver === me.address)) return { step: "done" as const, payoutId };
     const weight = signed.reduce((s, a) => s + (org.approvers.find((x) => x.address === a.approver)?.weight ?? 0), 0);
     if (weight + me.weight < org.threshold) {
       return { step: "approve" as const, typedData: approveTypedData(org.validator, org.chain_id, batch.approve_hash), manifest: batch.manifest };
@@ -639,8 +663,42 @@ Review and approve: ${this.cfg.appUrl}#/approve/${batchId}`,
     }
   }
 
+  /** Batches with who has signed each: the operator sees whom the payout is waiting for. */
   async batchesOf(payoutId: string) {
-    return (await this.db.query(`SELECT id, batch_no, kind, status, approve_hash, tx_hash FROM batches WHERE payout_id=$1 ORDER BY batch_no`, [payoutId])).rows;
+    const batches = (await this.db.query(`SELECT id, batch_no, kind, status, approve_hash, tx_hash, created_at FROM batches WHERE payout_id=$1 ORDER BY batch_no`, [payoutId])).rows;
+    if (!batches.length) return batches;
+    const orgId = (await this.db.query(`SELECT org_id FROM payouts WHERE id=$1`, [payoutId])).rows[0].org_id;
+    const threshold = Number((await this.db.query(`SELECT threshold FROM orgs WHERE id=$1`, [orgId])).rows[0].threshold);
+    const approvers = (
+      await this.db.query(
+        `SELECT a.address, a.weight, (SELECT u.email FROM users u WHERE lower(u.wallet)=lower(a.address) LIMIT 1) AS email FROM approvers a WHERE a.org_id=$1 ORDER BY a.address`,
+        [orgId],
+      )
+    ).rows as { address: Address; weight: number; email: string | null }[];
+    const signed = (await this.db.query(`SELECT batch_id, approver FROM approvals WHERE batch_id = ANY($1)`, [batches.map((b) => b.id)])).rows as { batch_id: string; approver: string }[];
+    return batches.map((b) => {
+      const mine = new Set(signed.filter((s) => s.batch_id === b.id).map((s) => s.approver.toLowerCase()));
+      const signers = approvers.map((a) => ({ ...a, signed: mine.has(a.address.toLowerCase()) }));
+      return { ...b, threshold, signedWeight: signers.filter((s) => s.signed).reduce((x, s) => x + s.weight, 0), signers };
+    });
+  }
+
+  /** Batches waiting for this approver's signature, across every organisation they approve for. */
+  async pendingFor(wallet: Address) {
+    const { rows } = await this.db.query(
+      `SELECT b.id, b.kind, b.batch_no, b.manifest, b.created_at, p.id AS payout_id, p.title, o.id AS org_id, o.name AS org, o.threshold
+         FROM batches b JOIN payouts p ON p.id=b.payout_id JOIN orgs o ON o.id=p.org_id
+         JOIN approvers a ON a.org_id=o.id AND lower(a.address)=lower($1)
+        WHERE b.status='collecting'
+          AND NOT EXISTS (SELECT 1 FROM approvals x WHERE x.batch_id=b.id AND lower(x.approver)=lower($1))
+        ORDER BY b.created_at`,
+      [wallet],
+    );
+    return rows.map((r) => {
+      const m = manifestFromJson(r.manifest);
+      const paying = m.rows.filter((x) => x.kind === "transfer" || x.kind === "escrow");
+      return { batchId: r.id, kind: r.kind, payoutId: r.payout_id, title: r.title, orgId: r.org_id, org: r.org, rows: m.rows.length, total: paying.reduce((s, x) => s + x.amount, 0n).toString(), createdAt: r.created_at };
+    });
   }
 }
 

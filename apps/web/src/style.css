@@ -42,3 +42,53 @@
   .show-phone { display: inline; }
   .topbar-inner { gap: 6px; }
 }
+/* feedback */
+.toasts { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); z-index: 60; display: flex; flex-direction: column; gap: 8px; align-items: center; pointer-events: none; }
+.toast { background: var(--text); color: var(--surface); padding: 10px 16px; border-radius: var(--r); box-shadow: var(--shadow-lg); font-size: 14px; font-weight: 500; animation: rise 0.16s ease-out; max-width: calc(100vw - 32px); }
+.toast.bad { background: var(--bad); color: #fff; }
+
+/* stepper */
+.steps { display: flex; gap: 0; margin: 4px 0 20px; padding: 0; list-style: none; counter-reset: step; overflow-x: auto; }
+.step { flex: 1; min-width: 110px; position: relative; padding-top: 22px; font-size: 13px; color: var(--text-3); font-weight: 600; }
+.step::before { content: ""; position: absolute; top: 7px; left: 0; right: 0; height: 2px; background: var(--border); }
+.step::after { counter-increment: step; content: counter(step); position: absolute; top: 0; left: 0; width: 16px; height: 16px; border-radius: 50%; background: var(--surface); border: 2px solid var(--border-strong); font-size: 10px; line-height: 12px; text-align: center; color: var(--text-3); }
+.step.done { color: var(--text-2); }
+.step.done::before { background: var(--ok); }
+.step.done::after { content: "✓"; background: var(--ok); border-color: var(--ok); color: #fff; }
+.step.current { color: var(--accent-text); }
+.step.current::before { background: linear-gradient(to right, var(--accent) 50%, var(--border) 50%); }
+.step.current::after { border-color: var(--accent); background: var(--accent); color: var(--on-accent); }
+
+/* next action */
+.next { border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); }
+.next .kicker { font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent-text); margin-bottom: 6px; }
+.signer-list { list-style: none; padding: 0; margin: 12px 0 0; display: grid; gap: 6px; }
+.signer-list li { display: flex; align-items: center; gap: 10px; font-size: 14px; }
+.tick { width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 700; flex: none; }
+.tick.yes { background: var(--ok-soft); color: var(--ok); }
+.tick.no { background: var(--surface-2); color: var(--text-3); border: 1px dashed var(--border-strong); }
+
+/* new payout */
+.segmented { display: inline-flex; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r); padding: 3px; gap: 2px; flex-wrap: wrap; margin-bottom: 14px; }
+.segmented button { background: transparent; border: 0; color: var(--text-2); min-height: 34px; padding: 6px 12px; }
+.segmented button.on { background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
+.dropzone { border: 2px dashed var(--border-strong); border-radius: var(--r-lg); padding: 28px 16px; text-align: center; cursor: pointer; transition: border-color 0.12s, background 0.12s; display: block; }
+.dropzone:hover, .dropzone.over { border-color: var(--accent); background: var(--accent-soft); }
+.dropzone input { display: none; }
+.dropzone .big { font-weight: 650; font-size: 16px; margin-bottom: 4px; }
+.problems { list-style: none; padding: 0; margin: 0; display: grid; gap: 4px; }
+.problems li { font-size: 14px; }
+.problems .ln { display: inline-block; min-width: 64px; font-family: var(--mono); font-size: 12px; color: var(--bad); }
+.sticky-foot { position: sticky; bottom: 0; background: color-mix(in srgb, var(--bg) 92%, transparent); backdrop-filter: blur(8px); border-top: 1px solid var(--border); padding: 12px 0; margin-top: 16px; display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; z-index: 5; }
+.manual-row { display: grid; grid-template-columns: 1.2fr 2fr 0.8fr 1fr auto; gap: 8px; margin-bottom: 8px; }
+.pending-list { display: grid; gap: 10px; }
+.pending { display: flex; align-items: center; gap: 12px; padding: 14px 16px; }
+.pending .grow { flex: 1; min-width: 0; }
+.pending .amt { font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+@media (max-width: 720px) {
+  .manual-row { grid-template-columns: 1fr 1fr; }
+  .manual-row > :nth-child(2) { grid-column: 1 / -1; order: 3; }
+  .pending { flex-wrap: wrap; }
+  .pending .grow { flex-basis: 100%; }
+  .pending .amt { flex: 1; }
+}

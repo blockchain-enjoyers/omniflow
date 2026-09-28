@@ -13,6 +13,18 @@ export function SetupNew() {
   const [operators, setOperators] = useState("");
   const a = useAction();
   const total = approvers.reduce((s, x) => s + x.weight, 0);
+  const [tried, setTried] = useState(false);
+  const emailOk = (e: string) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e);
+  const emails = approvers.map((x) => x.email.toLowerCase());
+  const problems = [
+    !name.trim() && "Give the organization a name.",
+    approvers.some((x) => !x.email) && "Fill in every approver's email (or remove the empty line).",
+    approvers.some((x) => x.email && !emailOk(x.email)) && "One of the emails does not look right.",
+    new Set(emails.filter(Boolean)).size !== emails.filter(Boolean).length && "The same email is listed twice.",
+    (threshold < 1 || threshold > total) && `The threshold must be between 1 and ${total}.`,
+    threshold === 1 && approvers.length > 1 && "Threshold 1 means any single approver can send money alone — are you sure?",
+  ].filter(Boolean) as string[];
+  const blocking = problems.filter((p) => !p.startsWith("Threshold 1"));
   return (
     <div className="narrow">
       <a className="back" href="#/">← Organizations</a>
@@ -24,7 +36,7 @@ export function SetupNew() {
         <div className="stack" style={{ marginBottom: 12 }}>
           {approvers.map((ap, i) => (
             <div className="row" key={i}>
-              <input className="grow" data-testid={`approver-${i}`} type="email" placeholder="approver email" value={ap.email} onChange={(e) => setApprovers(approvers.map((x, j) => (j === i ? { ...x, email: e.target.value.trim() } : x)))} />
+              <input className="grow" data-testid={`approver-${i}`} type="email" placeholder="approver email" aria-invalid={tried && (!ap.email || !emailOk(ap.email))} value={ap.email} onChange={(e) => setApprovers(approvers.map((x, j) => (j === i ? { ...x, email: e.target.value.trim() } : x)))} />
               <input className="input-inline" aria-label="weight" type="number" min={1} value={ap.weight} style={{ width: 72 }} onChange={(e) => setApprovers(approvers.map((x, j) => (j === i ? { ...x, weight: Math.max(1, Number(e.target.value)) } : x)))} />
               {approvers.length > 1 && <button className="ghost" aria-label="remove" onClick={() => setApprovers(approvers.filter((_, j) => j !== i))}>✕</button>}
             </div>
@@ -36,6 +48,11 @@ export function SetupNew() {
           <input className="input-inline" data-testid="threshold" type="number" min={1} max={total} value={threshold} style={{ width: 80 }} onChange={(e) => setThreshold(Number(e.target.value))} />
           <span className="hint">of {total} — votes needed for money to leave</span>
         </div>
+        {problems.length > 0 && (tried || problems.some((p) => p.startsWith("Threshold 1"))) && (
+          <Callout tone={blocking.length && tried ? "bad" : "warn"} testid="setup-problems">
+            <ul className="problems">{problems.filter((p) => tried || p.startsWith("Threshold 1")).map((p) => <li key={p}>{p}</li>)}</ul>
+          </Callout>
+        )}
         <Callout tone="warn">If approvers lose access so that the threshold can no longer be reached, the money on the account is locked forever — there is no recovery.</Callout>
         <Field label="Operators" help="Prepare payouts but cannot sign. Comma-separated; can be added later.">
           <input value={operators} placeholder="ops@company.com" onChange={(e) => setOperators(e.target.value)} />
@@ -43,8 +60,10 @@ export function SetupNew() {
         <div className="actions">
           <button
             data-testid="setup-start"
-            disabled={a.busy || !name}
+            disabled={a.busy || (tried && blocking.length > 0)}
             onClick={a.run(async () => {
+              setTried(true);
+              if (blocking.length) return;
               const s = await call<Setup>(auth.headers, "POST", "/org-setups", { name, threshold, approvers, operators: operators.split(",").map((x) => x.trim()).filter(Boolean) });
               window.location.hash = `#/setup/${s.id}`;
             })}

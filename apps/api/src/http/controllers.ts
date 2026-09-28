@@ -22,6 +22,7 @@ import { getAddress } from "viem";
 import type pg from "pg";
 import { readDevMailbox } from "@omniflow/devmail";
 import { HttpError, PayoutService } from "../payouts/service.js";
+import type { RowInput } from "../payouts/csv.js";
 import type { ChainClient } from "../chain/chain.js";
 import type { OrgService } from "../orgs/service.js";
 import type { AuthUser } from "../auth/privy.js";
@@ -39,7 +40,7 @@ export const EXTRA = Symbol("Extra");
 export class ErrorFilter implements ExceptionFilter {
   catch(e: unknown, host: ArgumentsHost) {
     const res = host.switchToHttp().getResponse();
-    if (e instanceof HttpError) return res.status(e.status).json({ error: e.message });
+    if (e instanceof HttpError) return res.status(e.status).json({ error: e.message, ...(e.details ? { details: e.details } : {}) });
     if (e instanceof HttpException) return res.status(e.getStatus()).json({ error: e.message });
     console.error(e);
     return res.status(500).json({ error: "internal error" });
@@ -53,11 +54,17 @@ type Rq = { user: AuthUser };
 @UseFilters(ErrorFilter)
 @UseGuards(AuthGuard)
 export class MeController {
-  constructor(@Inject(ORGS) private readonly orgs: OrgService) {}
+  constructor(@Inject(ORGS) private readonly orgs: OrgService, @Inject(PAYOUTS) private readonly payouts: PayoutService) {}
 
   @Get("me")
   me(@Req() r: Rq) {
     return this.orgs.me(r.user);
+  }
+
+  /** What waits for my signature — so an approver does not have to find the email. */
+  @Get("me/approvals")
+  async approvals(@Req() r: Rq) {
+    return r.user.wallet ? this.payouts.pendingFor(getAddress(r.user.wallet)) : [];
   }
 }
 
@@ -151,11 +158,23 @@ export class OrgController {
   }
 
   @Post(":id/payouts")
-  async create(@Req() r: Rq, @Param("id") id: string, @Body() b: { title: string; csv: string; autoRefundDays?: number | null }) {
+  async create(@Req() r: Rq, @Param("id") id: string, @Body() b: { title: string; csv?: string; rows?: RowInput[]; autoRefundDays?: number | null }) {
     await this.orgs.requireRole(id, r.user, ["operator"]);
     const p = await this.payouts.createPayout(id, b);
     await this.orgs.audit(id, r.user.did, "payout.created", { payoutId: p.id, title: b.title, rows: p.rows });
     return p;
+  }
+
+  /** Import preview: what the rows will become, line by line, before anything is created. */
+  @Post(":id/payouts/preview")
+  async preview(@Req() r: Rq, @Param("id") id: string, @Body() b: { csv?: string; rows?: RowInput[] }) {
+    await this.orgs.requireRole(id, r.user, ["operator"]);
+    const p = await this.payouts.parseRows(id, b);
+    return json({
+      ...p,
+      rows: p.rows.map((x) => ({ ...x, status: x.chainId !== p.chainId ? "other_chain" : !x.address && !x.email ? "waiting_details" : "ready" })),
+      total: p.rows.reduce((s, x) => s + x.amount, 0n),
+    });
   }
 
   @Get(":id/balance")

@@ -1,6 +1,6 @@
 import { useAuth } from "@omniflow/auth-client";
-import { call, type NextStep } from "../api";
-import { Addr, Callout, Err, Section, Table, usdc, useAction, useLoad } from "../ui";
+import { call, type Batch, type NextStep } from "../api";
+import { Addr, Callout, Err, Section, short, Table, toast, usdc, useAction, useLoad, usePoll } from "../ui";
 
 /**
  * Role B. What leaves the account, then one signature. NB: the wallet signs a hash; what it stands for is shown
@@ -20,6 +20,10 @@ export function ApprovePage({ batchId }: { batchId: string }) {
       : kind === "rekey" ? `Send new links for ${m!.rows.length} unclaimed payments — the old links stop working`
         : `${usdc(total)} leaves the organization account to ${paying.length} recipients`;
   const recipients = m?.rows.length ?? 0;
+  const payoutId = s && "payoutId" in s ? s.payoutId : m?.payoutId;
+  const batches = useLoad(() => (payoutId ? call<Batch[]>(auth.headers, "GET", `/payouts/${payoutId}/batches`) : Promise.resolve([])), [payoutId]);
+  const b = batches.data?.find((x) => x.id === batchId);
+  usePoll(async () => { await step.reload(); await batches.reload(); }, s?.step === "done" || (s?.step === "closed" && s.status === "submitted"), 3000);
   return (
     <div className="narrow">
       <div className="page-head"><div><h1>Approval</h1><div className="sub">{m ? `Batch ${m.batchNo + 1}` : "…"}</div></div></div>
@@ -56,7 +60,9 @@ export function ApprovePage({ batchId }: { batchId: string }) {
                     const sig = await auth.signHash(s!.userOpHash, `${what} — yours is the last signature; the operation goes on chain`);
                     await call(auth.headers, "POST", `/batches/${batchId}/final`, { signature: sig });
                   }
+                  toast(s!.step === "final" ? "Signed — sending to the network" : "Signed");
                   await step.reload();
+                  await batches.reload();
                 })}
               >
                 {s!.step === "final" ? "Sign and send" : "Approve"}
@@ -64,8 +70,16 @@ export function ApprovePage({ batchId }: { batchId: string }) {
             </div>
           </>
         )}
-        {s?.step === "done" && <Callout tone="ok" testid="done">You have signed. Waiting for the other approvers.</Callout>}
-        {s?.step === "closed" && <Callout tone="info" testid="closed">Nothing to sign: the batch is already {s.status === "mined" ? "executed" : s.status === "submitted" ? "submitted on chain" : s.status}.</Callout>}
+        {s?.step === "done" && <Callout tone="ok" testid="done">You have signed. Waiting for the other approvers{b ? ` — ${b.signedWeight} of ${b.threshold} so far` : ""}.</Callout>}
+        {s?.step === "closed" && <Callout tone={s.status === "mined" ? "ok" : "info"} testid="closed">{s.status === "mined" ? "Done — this batch was executed on chain." : s.status === "submitted" ? "All signatures are in — sending to the network…" : `Nothing to sign: the batch is ${s.status}.`}</Callout>}
+        {b && (s?.step === "done" || s?.step === "closed") && (
+          <ul className="signer-list">
+            {b.signers.map((x) => (
+              <li key={x.address}><span className={`tick ${x.signed ? "yes" : "no"}`}>{x.signed ? "✓" : ""}</span><span>{x.email ?? short(x.address)}</span></li>
+            ))}
+          </ul>
+        )}
+        {payoutId && (s?.step === "done" || s?.step === "closed") && <div className="actions"><a className="btn secondary" href={`#/payout/${payoutId}`}>Open the payout</a><a className="btn secondary" href="#/">Back to home</a></div>}
         <Err e={step.error || a.error} />
       </Section>
     </div>

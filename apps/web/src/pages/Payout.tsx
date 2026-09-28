@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { useAuth } from "@omniflow/auth-client";
-import { call, type Batch, type Receipt, type Review, type ReviewRow } from "../api";
-import { Addr, Badge, Callout, Err, Section, short, Table, usdc, useAction, useLoad } from "../ui";
+import { call, type Batch, type Org, type Receipt, type Review, type ReviewRow } from "../api";
+import { Addr, Badge, Callout, confirmAction, Err, Section, short, Table, toast, usdc, useAction, useLoad, usePoll } from "../ui";
 
 const who = (r: ReviewRow) => `${r.name}${r.address ? ` · ${short(r.address)}` : ""}${r.email ? ` · ${r.email}` : ""}`;
 const REASON: Record<string, string> = { "no-address-no-email": "no address and no email — waiting for details", "other-chain": "other chain — will not be sent" };
@@ -18,14 +18,26 @@ export function PayoutPage({ id }: { id: string }) {
   const [add, setAdd] = useState({ name: "", address: "", email: "", amount: "" });
   const [every, setEvery] = useState<"month" | "week">("month");
   const a = useAction();
-  const reload = async () => {
+  const reload = useCallback(async () => {
     await Promise.all([receipt.reload(), review.reload(), batches.reload()]);
-  };
+  }, [receipt.reload, review.reload, batches.reload]);
   const rows = receipt.data?.rows ?? [];
   const editable = (s: string) => ["ready", "waiting_details", "other_chain"].includes(s);
   const openBatch = batches.data?.find((b) => ["collecting", "submitted"].includes(b.status));
   const s = review.data?.summary;
   const closed = receipt.data?.payout.status === "closed";
+
+  // Where the payout is, and the one thing to do next.
+  const pending = batches.data?.find((b) => b.status === "collecting");
+  const sending = batches.data?.find((b) => b.status === "submitted");
+  const sendableNow = s ? s.toAddress + s.byEmail : 0;
+  const executed = rows.some((r) => r.executed);
+  const stage: "draft" | "approval" | "sending" | "done" = sending ? "sending" : pending ? "approval" : closed ? "done" : sendableNow > 0 ? "draft" : executed ? "done" : "draft";
+  const stageNo = { draft: 0, approval: 1, sending: 2, done: 3 }[stage];
+  usePoll(reload, stage === "approval" || stage === "sending", 3000);
+  const me = auth.user?.wallet?.toLowerCase();
+  const mySignature = pending?.signers.find((x) => x.address.toLowerCase() === me);
+  const count = (st: string) => rows.filter((r) => r.status === st).length;
 
   const rowCells = (r: (typeof rows)[number]) => {
     const e = edit[r.row];
@@ -41,8 +53,8 @@ export function PayoutPage({ id }: { id: string }) {
             <input aria-label="address" className="mono" data-testid={`row-address-${r.name}`} placeholder="address 0x…" value={e.address ?? ""} onChange={(x) => setE({ address: x.target.value.trim() })} />
             <input aria-label="email" data-testid={`row-email-${r.name}`} placeholder="email" value={e.email ?? ""} onChange={(x) => setE({ email: x.target.value.trim() })} />
             <span className="row">
-              <button className="sm" data-testid={`row-save-${r.name}`} onClick={a.run(async () => { await call(auth.headers, "PATCH", `/payouts/${id}/rows/${r.row}`, { amount: e.amount, address: e.address || null, email: e.email || null }); const n = { ...edit }; delete n[r.row]; setEdit(n); await reload(); })}>Save</button>
-              <button className="ghost sm" data-testid={`row-remove-${r.name}`} onClick={a.run(async () => { await call(auth.headers, "PATCH", `/payouts/${id}/rows/${r.row}`, { remove: true }); await reload(); })}>Remove row</button>
+              <button className="sm" data-testid={`row-save-${r.name}`} onClick={a.run(async () => { await call(auth.headers, "PATCH", `/payouts/${id}/rows/${r.row}`, { amount: e.amount, address: e.address || null, email: e.email || null }); const n = { ...edit }; delete n[r.row]; setEdit(n); toast(`${r.name} updated`); await reload(); })}>Save</button>
+              <button className="ghost sm" data-testid={`row-remove-${r.name}`} onClick={a.run(async () => { await call(auth.headers, "PATCH", `/payouts/${id}/rows/${r.row}`, { remove: true }); toast(`${r.name} removed`); await reload(); })}>Remove row</button>
               <button className="ghost sm" onClick={() => { const n = { ...edit }; delete n[r.row]; setEdit(n); }}>Cancel</button>
             </span>
           </span>
@@ -55,11 +67,12 @@ export function PayoutPage({ id }: { id: string }) {
     ];
   };
   const orgId = receipt.data?.payout.orgId;
+  const org = useLoad(() => (orgId ? call<Org>(auth.headers, "GET", `/orgs/${orgId}`) : Promise.resolve(null)), [orgId]);
   const selectable = rows.some((r) => r.status === "in_escrow");
 
   return (
     <>
-      {orgId && <a className="back" href={`#/org/${orgId}`}>← Organization</a>}
+      {orgId && <a className="back" href={`#/org/${orgId}`}>← {org.data?.name ?? "Organization"}</a>}
       <div className="page-head">
         <div>
           <h1 data-testid="payout-title">{receipt.data?.payout.title ?? "…"}</h1>
@@ -67,14 +80,55 @@ export function PayoutPage({ id }: { id: string }) {
         </div>
         <div className="row">
           <button className="secondary" data-testid="repeat" onClick={a.run(async () => { const p = await call<{ id: string }>(auth.headers, "POST", `/payouts/${id}/repeat`, {}); window.location.hash = `#/payout/${p.id}`; })}>Repeat with edits</button>
-          {!closed && <button className="secondary" data-testid="close" onClick={a.run(async () => { await call(auth.headers, "POST", `/payouts/${id}/close`); await reload(); })}>Close payout</button>}
+          {!closed && <button className="secondary" data-testid="close" onClick={a.run(async () => { if (!(await confirmAction({ title: "Close this payout?", body: "Rows that were not sent stay in the report; nothing more will be sent from this payout. Payments already sent are not affected.", confirm: "Close payout", danger: true }))) return; await call(auth.headers, "POST", `/payouts/${id}/close`); toast("Payout closed"); await reload(); })}>Close payout</button>}
         </div>
       </div>
 
-      {s && !closed && s.toAddress + s.byEmail === 0 && s.notSent.length > 0 && (
+      <ol className="steps" data-testid="stepper" aria-label="progress">
+        {["Prepare", "Approve", "Send", "Done"].map((label, i) => (
+          <li key={label} className={`step ${i < stageNo || (stage === "done" && i === 3) ? "done" : i === stageNo ? "current" : ""}`}>{label}</li>
+        ))}
+      </ol>
+
+      {stage === "approval" && pending && (
+        <Section title={pending.kind === "revoke" ? "Revoke is waiting for approvals" : pending.kind === "rekey" ? "New links are waiting for approvals" : "Waiting for approvals"} testid="approval-progress">
+          <p style={{ marginBottom: 0 }}>
+            <b data-testid="approval-count">{pending.signedWeight} of {pending.threshold}</b> signatures. {mySignature && !mySignature.signed ? "Yours is needed too." : "The approvers were emailed a link; this page updates by itself."}
+          </p>
+          <ul className="signer-list">
+            {pending.signers.map((x) => (
+              <li key={x.address}>
+                <span className={`tick ${x.signed ? "yes" : "no"}`}>{x.signed ? "✓" : ""}</span>
+                <span>{x.email ?? short(x.address)}</span>
+                <span className="hint small">{x.signed ? "signed" : "waiting"}</span>
+              </li>
+            ))}
+          </ul>
+          {mySignature && !mySignature.signed && <div className="actions"><a className="btn" href={`#/approve/${pending.id}`} data-testid="go-sign">Review and sign</a></div>}
+        </Section>
+      )}
+
+      {stage === "sending" && (
+        <Callout tone="info" testid="sending">All signatures are in — sending to the network. This takes a few seconds.</Callout>
+      )}
+
+      {stage === "done" && executed && (
+        <Section title={closed ? "Payout closed" : "Sent"} testid="done-summary">
+          <div className="row" style={{ gap: 20 }}>
+            <span><b>{count("sent")}</b> paid to an address</span>
+            <span><b>{count("claimed")}</b> claimed by link</span>
+            <span><b>{count("in_escrow")}</b> waiting to be claimed</span>
+            {count("refunded") > 0 && <span><b>{count("refunded")}</b> returned</span>}
+            {count("failed") > 0 && <span className="error" style={{ margin: 0 }}><b>{count("failed")}</b> failed — they can be sent again</span>}
+          </div>
+          {count("in_escrow") > 0 && <p className="hint" style={{ marginTop: 10, marginBottom: 0 }}>Someone lost the email? Tick their row below to send a new link, or revoke the payment to get the money back.</p>}
+        </Section>
+      )}
+
+      {s && !closed && s.toAddress + s.byEmail === 0 && s.notSent.length > 0 && stage === "draft" && (
         <Callout tone="warn">Nothing to send. Not sent: {s.notSent.map((n) => `${n.row.name} — ${REASON[n.reason] ?? n.reason}`).join("; ")}.</Callout>
       )}
-      {s && s.toAddress + s.byEmail > 0 && !closed && (
+      {s && stage === "draft" && s.toAddress + s.byEmail > 0 && !closed && (
         <Section title="Review before sending" desc="Check new recipients and changes — the main source of irreversible mistakes." testid="review">
           <div className="grid grid-3" style={{ marginBottom: 16 }}>
             <div className="stat"><span className="label">Will be sent</span><span className="value sm">{s.toAddress + s.byEmail} rows</span><span className="foot">to address {s.toAddress} · by email link {s.byEmail}</span></div>
@@ -91,8 +145,8 @@ export function PayoutPage({ id }: { id: string }) {
             {openBatch ? (
               <a className="btn secondary" href={`#/approve/${openBatch.id}`}>A batch is awaiting approval — open</a>
             ) : (
-              <button data-testid="freeze" disabled={a.busy || s.toAddress + s.byEmail === 0} onClick={a.run(async () => { await call(auth.headers, "POST", `/payouts/${id}/batches`); await reload(); })}>
-                Send for approval
+              <button data-testid="freeze" disabled={a.busy || s.toAddress + s.byEmail === 0} onClick={a.run(async () => { await call(auth.headers, "POST", `/payouts/${id}/batches`); toast("Sent for approval — the approvers got an email"); await reload(); })}>
+                Send {usdc(s.total)} for approval
               </button>
             )}
           </div>
@@ -108,12 +162,12 @@ export function PayoutPage({ id }: { id: string }) {
           <div style={{ padding: "16px 20px", borderTop: "1px solid var(--border)" }}>
             <p style={{ marginBottom: 8 }}><b>Unclaimed payments selected: {picked.length}.</b> <span className="hint">Both actions are approved by the threshold, like a payout. Revoked money returns to the organization account.</span></p>
             <div className="row">
-              <button data-testid="rekey" onClick={a.run(async () => { await call(auth.headers, "POST", `/payouts/${id}/rekey`, { rows: picked }); setPicked([]); await reload(); })}>Send new links</button>
-              <button data-testid="revoke" className="danger" onClick={a.run(async () => { await call(auth.headers, "POST", `/payouts/${id}/revoke`, { rows: picked }); setPicked([]); await reload(); })}>Revoke</button>
+              <button data-testid="rekey" onClick={a.run(async () => { if (!(await confirmAction({ title: `Send new links for ${picked.length} payment${picked.length > 1 ? "s" : ""}?`, body: "The old links stop working once the approvers sign. The recipients get a new email.", confirm: "Send for approval" }))) return; await call(auth.headers, "POST", `/payouts/${id}/rekey`, { rows: picked }); setPicked([]); toast("New links sent for approval"); await reload(); })}>Send new links</button>
+              <button data-testid="revoke" className="danger" onClick={a.run(async () => { if (!(await confirmAction({ title: `Revoke ${picked.length} unclaimed payment${picked.length > 1 ? "s" : ""}?`, body: "Once the approvers sign, the money returns to the organization account and the links stop working.", confirm: "Revoke", danger: true }))) return; await call(auth.headers, "POST", `/payouts/${id}/revoke`, { rows: picked }); setPicked([]); toast("Revoke sent for approval"); await reload(); })}>Revoke</button>
             </div>
           </div>
         )}
-        {!closed && (
+        {!closed && (stage === "draft" || stage === "done") && (
           <div style={{ padding: "16px 20px", borderTop: "1px solid var(--border)" }}>
             <h3 style={{ marginTop: 0 }}>Add a row</h3>
             <div className="row">
@@ -130,7 +184,7 @@ export function PayoutPage({ id }: { id: string }) {
 
       {!closed && rows.some((r) => !r.address && ["waiting_details", "ready"].includes(r.status)) && (
         <Section title="Payment details form" desc="The recipient enters their address or email. It is not a link to money; once filled in, send the row for approval." testid="forms">
-          <button data-testid="forms-create" onClick={a.run(async () => setLinks(await call(auth.headers, "POST", `/payouts/${id}/forms`, {})))}>Create links</button>
+          <button className="secondary" data-testid="forms-create" onClick={a.run(async () => setLinks(await call(auth.headers, "POST", `/payouts/${id}/forms`, {})))}>Create links</button>
           {links.length > 0 && (
             <ul className="check-list" style={{ marginTop: 12 }}>
               {links.map((l) => (

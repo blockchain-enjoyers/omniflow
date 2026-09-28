@@ -93,9 +93,10 @@ describe.skipIf(!DB_URL)("the application through the browser", () => {
   }
   const pendingMails = async () => (await mail(a1)).filter((m) => /waiting for your approval/.test(m.subject)).length;
   /** Clicks what creates a batch, waits for its "waiting for your approval" letter; a1 approves, a2 signs last and sends. */
-  async function approveBoth(page: Page, button: string) {
+  async function approveBoth(page: Page, button: string, confirm = false) {
     const before = await pendingMails();
     await page.getByTestId(button).click();
+    if (confirm) await page.getByTestId("confirm-ok").click(); // revoke and new links are confirmed first
     await expect.poll(pendingMails, { timeout: 15_000 }).toBeGreaterThan(before);
     const url = await linkIn(a1, /waiting for your approval/, stack.urls.web);
     const p1 = pages[a1]!;
@@ -168,6 +169,8 @@ describe.skipIf(!DB_URL)("the application through the browser", () => {
     await p.getByTestId("org-name").fill("Acme");
     await p.getByTestId("approver-0").fill(a1);
     await p.getByTestId("add-approver").click();
+    await p.getByTestId("setup-start").click(); // an empty approver line is caught before anything is sent
+    await expect.poll(() => text(p, "setup-problems")).toContain("Fill in every approver's email");
     await p.getByTestId("approver-1").fill(a2);
     await p.getByTestId("threshold").fill("2");
     await shot(p, "setup-new");
@@ -217,16 +220,34 @@ describe.skipIf(!DB_URL)("the application through the browser", () => {
     expect(await balance(account)).toBe(9_825_000_000n); // 10 000 minus the emulated 1.75 % fee
   });
 
-  it("CSV → review → send for approval; approvers are notified", async () => {
+  it("a spreadsheet as Excel saves it is imported; no title — no payout; bad rows are shown line by line", async () => {
     const p = pages[ops]!;
     await p.goto(`${orgUrl}/payouts`);
-    await p.getByTestId("new-payout-toggle").click();
-    const chainId = stack.chain.chainId;
-    await p.getByTestId("payout-title").fill("September");
-    await p.getByTestId("payout-csv").fill(["name,email,address,chain_id,amount,category", `Alice,,${alice},${chainId},1000,grants`, `Carol,carol@example.test,,${chainId},250,grants`, `Dave,,,${chainId},10,grants`].join("\n"));
+    await p.getByTestId("new-payout").click();
+    await p.getByTestId("np-title").waitFor();
+    // a title is required
+    await p.getByTestId("np-create").click();
+    await p.getByTestId("np-title-error").waitFor();
+    expect(await p.getByTestId("np-create").isDisabled()).toBe(true);
+    // bad rows: reported with their lines, nothing can be created
+    await p.getByTestId("np-tab-paste").click();
+    await p.getByTestId("np-paste").fill(`name\tamount\taddress\nAlice\t1,500\t${alice}\nBob\t5\t0x12`);
+    await expect.poll(() => text(p, "np-errors"), { timeout: 10_000 }).toContain("line 2");
+    expect(await text(p, "np-errors")).toContain("ambiguous");
+    expect(await text(p, "np-errors")).toContain("line 3");
+    await shot(p, "payout-new-errors");
+    // the real file: BOM, semicolons, CRLF, decimal comma, columns in another order, no chain_id
+    await p.getByTestId("np-tab-file").click();
+    const excel = `\uFEFFName;Wallet;E-mail;Amount;Category\r\nAlice;${alice};;1 000,00;grants\r\nCarol;;carol@example.test;250;grants\r\nDave;;;10;grants\r\n`;
+    await p.getByTestId("np-file").setInputFiles({ name: "september.csv", mimeType: "text/csv", buffer: Buffer.from(excel, "utf8") });
+    await expect.poll(() => text(p, "np-summary"), { timeout: 10_000 }).toContain("3 rows");
+    expect(await text(p, "np-summary")).toContain("1,260 USDC");
+    expect(await p.getByTestId("np-errors").count()).toBe(0);
+    await p.getByTestId("np-title").fill("September");
     await shot(p, "payout-new");
-    await p.getByTestId("payout-create").click();
+    await p.getByTestId("np-create").click();
     await p.getByTestId("review").waitFor();
+    expect(await p.getByTestId("toast").first().textContent()).toContain("Payout created");
     payoutUrl = p.url();
     expect(await text(p, "review")).toContain("2 rows");
     await shot(p, "payout-review");
@@ -237,11 +258,21 @@ describe.skipIf(!DB_URL)("the application through the browser", () => {
   it("2 of 2 in the cabinet: approve, then the final signature sends it", async () => {
     approveUrlSeen = await linkIn(a1, /waiting for your approval/, stack.urls.web);
     const p1 = pages[a1]!;
+    // the approver does not need the email: home lists what waits for them
+    await p1.goto(`${stack.urls.web}/#/`);
+    await p1.getByTestId("pending-September").waitFor();
+    expect(await text(p1, "pending-September")).toContain("1,250 USDC");
+    await shot(p1, "home-waiting");
     await p1.goto(approveUrlSeen);
     await expect.poll(() => text(p1, "what")).toContain("1,250 USDC");
     await shot(p1, "approve");
     await signIn(p1, "sign");
     await p1.getByTestId("done").waitFor();
+    // the operator sees who has signed, without refreshing
+    const o0 = pages[ops]!;
+    await o0.goto(payoutUrl);
+    await expect.poll(() => text(o0, "approval-count"), { timeout: 10_000 }).toBe("1 of 2");
+    await shot(o0, "payout-waiting");
 
     const p2 = pages[a2]!;
     await p2.goto(approveUrlSeen);
@@ -359,10 +390,17 @@ describe.skipIf(!DB_URL)("the application through the browser", () => {
     const p = pages[ops]!;
     const chainId = stack.chain.chainId;
     await p.goto(`${orgUrl}/payouts`);
-    await p.getByTestId("new-payout-toggle").click();
-    await p.getByTestId("payout-title").fill("Stipends");
-    await p.getByTestId("payout-csv").fill(["name,email,address,chain_id,amount", `Hana,hana@example.test,,${chainId},40`, `Ivan,ivan@example.test,,${chainId},60`].join("\n"));
-    await p.getByTestId("payout-create").click();
+    await p.getByTestId("new-payout").click();
+    await p.getByTestId("np-title").fill("Stipends");
+    await p.getByTestId("np-tab-manual").click(); // typed in, one per line
+    await p.getByTestId("np-name-0").fill("Hana");
+    await p.getByTestId("np-dest-0").fill("hana@example.test");
+    await p.getByTestId("np-amount-0").fill("40");
+    await p.getByTestId("np-name-1").fill("Ivan");
+    await p.getByTestId("np-dest-1").fill("ivan@example.test");
+    await p.getByTestId("np-amount-1").fill(`${chainId > 0 ? "60" : ""}`);
+    await expect.poll(() => text(p, "np-summary"), { timeout: 10_000 }).toContain("2 rows");
+    await p.getByTestId("np-create").click();
     await p.getByTestId("freeze").waitFor();
     const stipends = p.url();
     await approveBoth(p, "freeze");
@@ -372,18 +410,21 @@ describe.skipIf(!DB_URL)("the application through the browser", () => {
 
     await p.getByTestId("pick-Hana").check();
     await shot(p, "payout-picked");
-    await approveBoth(p, "rekey");
+    await approveBoth(p, "rekey", true);
     await expect.poll(async () => (await mail("hana@example.test"))[0]!.subject, { timeout: 30_000 }).toMatch(/a new link to your payment/);
     expect(await linkIn("hana@example.test", /a new link/, stack.urls.claim)).not.toBe(oldLink);
 
     await p.goto(stipends);
     await expect.poll(() => statusOf(p, "Ivan")).toBe("link sent, not claimed");
     await p.getByTestId("pick-Ivan").check();
-    await approveBoth(p, "revoke");
+    await approveBoth(p, "revoke", true);
     await p.goto(stipends);
     await expect.poll(() => statusOf(p, "Ivan"), { timeout: 30_000 }).toBe("returned");
 
     await p.getByTestId("close").click();
+    await p.getByTestId("confirm-modal").waitFor();
+    await shot(p, "confirm-close");
+    await p.getByTestId("confirm-ok").click();
     await expect.poll(() => text(p, "payout-status")).toBe("closed");
   });
 
@@ -396,6 +437,7 @@ describe.skipIf(!DB_URL)("the application through the browser", () => {
     expect((await mail("ops2@acme.test"))[0]!.subject).toMatch(/invitation/);
     await shot(p, "members");
     await p.getByTestId("remove-ops2@acme.test").click();
+    await p.getByTestId("confirm-ok").click();
     await expect.poll(() => p.getByTestId("member-ops2@acme.test").count()).toBe(0);
   });
 
@@ -443,6 +485,7 @@ describe.skipIf(!DB_URL)("the application through the browser", () => {
       [o, `${stack.urls.web}/`, "orgs"],
       ...["payouts", "book", "schedules", "topup", "reports", "members", "settings", "audit"].map((t) => [o, `${orgUrl}/${t}`, t] as [Page, string, string]),
       [o, payoutUrl, "payout"],
+      [o, `${orgUrl}/new`, "new payout"],
       [o, `${stack.urls.web}/#/setup/new`, "setup-new"],
       [pages[a1]!, setupUrl, "setup"],
       [pages[a1]!, approveUrlSeen, "approve"],

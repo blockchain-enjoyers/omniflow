@@ -142,3 +142,62 @@ export const Stat = ({ label, value, foot, sm, testid }: { label: string; value:
     {foot && <span className="foot">{foot}</span>}
   </div>
 );
+
+// ------------------------------------------------------------------ feedback: toasts and confirmations
+
+type Toast = { id: number; text: string; tone: "ok" | "bad" };
+let pushToast: ((t: Omit<Toast, "id">) => void) | null = null;
+/** A short confirmation that something happened ("Saved", "Sent for approval"). */
+export const toast = (text: string, tone: "ok" | "bad" = "ok") => pushToast?.({ text, tone });
+
+export function Toaster() {
+  const [items, setItems] = useState<Toast[]>([]);
+  pushToast = (t) => {
+    const id = Date.now() + Math.random();
+    setItems((xs) => [...xs, { ...t, id }]);
+    setTimeout(() => setItems((xs) => xs.filter((x) => x.id !== id)), 4000);
+  };
+  return (
+    <div className="toasts" aria-live="polite">
+      {items.map((t) => (
+        <div key={t.id} className={`toast ${t.tone}`} data-testid="toast">{t.text}</div>
+      ))}
+    </div>
+  );
+}
+
+interface Ask { title: string; body?: ReactNode; confirm: string; danger?: boolean; resolve: (ok: boolean) => void }
+let showAsk: ((a: Ask | null) => void) | null = null;
+/** Asks before anything that cannot be undone (revoke, close, delete). Resolves true when confirmed. */
+export const confirmAction = (a: Omit<Ask, "resolve">) => new Promise<boolean>((resolve) => showAsk?.({ ...a, resolve }));
+
+export function ConfirmHost() {
+  const [a, setA] = useState<Ask | null>(null);
+  showAsk = setA;
+  if (!a) return null;
+  const done = (ok: boolean) => {
+    setA(null);
+    a.resolve(ok);
+  };
+  return (
+    <div className="modal" role="dialog" aria-modal="true" data-testid="confirm-modal" onClick={(e) => e.target === e.currentTarget && done(false)}>
+      <div className="sheet">
+        <h2>{a.title}</h2>
+        {a.body && <div className="hint" style={{ marginTop: 8 }}>{a.body}</div>}
+        <div className="actions">
+          <button className="secondary" onClick={() => done(false)}>Cancel</button>
+          <button className={a.danger ? "danger" : ""} data-testid="confirm-ok" onClick={() => done(true)}>{a.confirm}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Re-runs `fn` every `ms` while `on` is true — for pages waiting on signatures or the network. */
+export function usePoll(fn: () => unknown, on: boolean, ms = 4000) {
+  useEffect(() => {
+    if (!on) return;
+    const t = setInterval(() => void fn(), ms);
+    return () => clearInterval(t);
+  }, [on, fn, ms]);
+}

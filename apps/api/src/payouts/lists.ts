@@ -1,4 +1,5 @@
 import { getAddress, isAddress, parseUnits, type Address } from "viem";
+import { normalizeAmount } from "./csv.js";
 import type { PayoutRow } from "@omniflow/shared";
 import type { Db } from "../db/db.js";
 import type { Mailer } from "../mail/mailer.js";
@@ -16,6 +17,16 @@ export interface BookEntry {
 /** Inputs besides CSV: address book, repeat with edits, recurring payouts. */
 export class ListService {
   constructor(private readonly db: Db, private readonly payouts: PayoutService, private readonly mailer: Mailer, private readonly appUrl: string, private readonly decimals: number) {}
+
+  /** Amounts typed by people: the same rules as the import — never guessed, positive, at most `decimals` places. */
+  private units(raw: string): bigint {
+    const a = normalizeAmount(String(raw ?? ""));
+    if ("error" in a) throw new HttpError(400, a.error);
+    if ((a.value.split(".")[1] ?? "").length > this.decimals) throw new HttpError(400, `"${raw}" has more than ${this.decimals} decimal places`);
+    const v = parseUnits(a.value, this.decimals);
+    if (v <= 0n) throw new HttpError(400, "amount must be more than 0");
+    return v;
+  }
 
   // ---------------------------------------------------------------- book
 
@@ -58,7 +69,7 @@ export class ListService {
     const rows: PayoutRow[] = input.items.map((it, i) => {
       const e = book.find((b) => b.id === it.id);
       if (!e) throw new HttpError(400, `address book entry ${it.id} not found`);
-      return { rowId: `row-${i + 2}`, name: e.name, email: e.email ?? undefined, address: e.address ? (getAddress(e.address) as Address) : undefined, chainId: e.chainId, amount: parseUnits(it.amount, this.decimals), category: e.category ?? undefined };
+      return { rowId: `row-${i + 2}`, name: e.name, email: e.email ?? undefined, address: e.address ? (getAddress(e.address) as Address) : undefined, chainId: e.chainId, amount: this.units(it.amount), category: e.category ?? undefined };
     });
     return this.payouts.createPayoutFromRows(orgId, { title: input.title, rows, autoRefundDays: input.autoRefundDays, source: "address_book" });
   }
@@ -85,7 +96,7 @@ export class ListService {
       return { removed: true };
     }
     if (e.address && !isAddress(e.address)) throw new HttpError(400, "invalid address");
-    const amount = e.amount !== undefined ? parseUnits(e.amount, this.decimals) : BigInt(r.amount);
+    const amount = e.amount !== undefined ? this.units(e.amount) : BigInt(r.amount);
     if (amount <= 0n) throw new HttpError(400, "amount must be positive");
     const address = e.address === undefined ? r.address : e.address ? getAddress(e.address) : null;
     const email = e.email === undefined ? r.email : e.email?.toLowerCase() || null;
@@ -102,7 +113,7 @@ export class ListService {
     const status = row.chainId !== p.chain_id ? "other_chain" : !row.address && !row.email ? "waiting_details" : "ready";
     await this.db.query(
       `INSERT INTO payout_rows (payout_id, row_key, name, email, address, chain_id, amount, status, category, details_source) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'manual')`,
-      [payoutId, `row-${n + 2}-m`, row.name, row.email?.toLowerCase() ?? null, row.address ? getAddress(row.address) : null, row.chainId, parseUnits(row.amount, this.decimals).toString(), status, row.category ?? null],
+      [payoutId, `row-${n + 2}-m`, row.name, row.email?.toLowerCase() ?? null, row.address ? getAddress(row.address) : null, row.chainId, this.units(row.amount).toString(), status, row.category ?? null],
     );
   }
 
@@ -116,6 +127,7 @@ export class ListService {
     const { rows } = await this.db.query(`SELECT org_id FROM payouts WHERE id=$1`, [s.templatePayoutId]);
     if (rows[0]?.org_id !== orgId) throw new HttpError(400, "template payout belongs to another organisation");
     if (!["week", "month"].includes(s.every)) throw new HttpError(400, "every must be week or month");
+    if (!(s.title ?? "").trim()) throw new HttpError(400, "give the schedule a title");
     const r = await this.db.query(
       `INSERT INTO schedules (org_id, title, template_payout_id, every, next_run_at, created_by) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
       [orgId, s.title, s.templatePayoutId, s.every, new Date(s.firstRunAt), actor],

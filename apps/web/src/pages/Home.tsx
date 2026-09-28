@@ -1,14 +1,32 @@
 import { useAuth } from "@omniflow/auth-client";
-import { call, type Me } from "../api";
-import { Addr, Badge, chainName, Err, Section, useLoad } from "../ui";
+import { call, type Me, type PendingApproval } from "../api";
+import { Addr, Badge, chainName, dateTime, Err, Section, usdc, useLoad } from "../ui";
 
 const ROLE: Record<string, string> = { admin: "admin", operator: "operator", approver: "approver" };
 
 export function Home() {
   const auth = useAuth();
   const me = useLoadMe(auth.headers, auth.user?.did);
+  const waiting = useLoad(() => call<PendingApproval[]>(auth.headers, "GET", "/me/approvals"), [auth.user?.did]);
+  const KIND: Record<string, string> = { pay: "Payout", revoke: "Revoke", rekey: "New links" };
   return (
     <>
+      {!!waiting.data?.length && (
+        <Section title={`Waiting for your signature (${waiting.data.length})`} desc="Payouts that cannot leave until you approve them." testid="waiting">
+          <div className="pending-list">
+            {waiting.data.map((w) => (
+              <div className="card pending" key={w.batchId} data-testid={`pending-${w.title}`}>
+                <div className="grow">
+                  <div className="cell-main">{w.title}</div>
+                  <div className="hint small">{w.org} · {KIND[w.kind] ?? w.kind} · {w.rows} row{w.rows > 1 ? "s" : ""} · {dateTime(w.createdAt)}</div>
+                </div>
+                {w.kind !== "rekey" && w.kind !== "revoke" && <span className="amt">{usdc(w.total)}</span>}
+                <a className="btn" href={`#/approve/${w.batchId}`}>Review and sign</a>
+              </div>
+            ))}
+          </div>
+        </Section>
+      )}
       <div className="page-head">
         <div>
           <h1>Organizations</h1>

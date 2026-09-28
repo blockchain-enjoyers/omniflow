@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import QRCode from "qrcode";
 import { useAuth } from "@omniflow/auth-client";
 import { call, type Org, type PayoutListItem } from "../api";
-import { Addr, Badge, Callout, chainName, date, dateTime, Err, Field, Section, Stat, Table, usdc, useAction, useLoad } from "../ui";
+import { Addr, Badge, Callout, chainName, confirmAction, date, dateTime, Err, Field, Section, Stat, Table, toast, usdc, useAction, useLoad } from "../ui";
 
 const TABS: [string, string][] = [
   ["payouts", "Payouts"], ["book", "Address book"], ["schedules", "Recurring"], ["topup", "Add funds"],
@@ -41,7 +41,7 @@ export function OrgPage({ id, tab }: { id: string; tab: string }) {
           <a key={k} className={`tab ${tab === k ? "active" : ""}`} href={`#/org/${id}/${k}`} data-testid={`tab-${k}`}>{label}</a>
         ))}
       </nav>
-      {o && tab === "payouts" && <Payouts org={o} />}
+      {o && tab === "payouts" && <Payouts org={o} balance={bal.data?.balance ?? null} />}
       {o && tab === "book" && <Book org={o} />}
       {o && tab === "schedules" && <Schedules org={o} />}
       {o && tab === "topup" && <TopUp org={o} onDone={bal.reload} />}
@@ -54,47 +54,26 @@ export function OrgPage({ id, tab }: { id: string; tab: string }) {
   );
 }
 
-function Payouts({ org }: { org: Org }) {
+function Payouts({ org, balance }: { org: Org; balance: string | null }) {
   const auth = useAuth();
   const list = useLoad(() => call<PayoutListItem[]>(auth.headers, "GET", `/orgs/${org.id}/payouts`), [org.id]);
-  const [title, setTitle] = useState("");
-  const [csv, setCsv] = useState(`name,email,address,chain_id,amount,category\n`);
-  const [override, setOverride] = useState("");
-  const [open, setOpen] = useState(false);
-  const a = useAction();
   const isOp = org.myRoles.includes("operator");
+  const empty = balance !== null && BigInt(balance) === 0n;
   return (
     <>
-      <Section flush title="Payouts" testid="payouts" actions={isOp && <button className={open ? "secondary" : ""} data-testid="new-payout-toggle" onClick={() => setOpen(!open)}>{open ? "Hide" : "+ New payout"}</button>}>
+      {isOp && empty && (
+        <Callout tone="info" testid="fund-first">
+          <b>The account is empty.</b> Add USDC before sending — you can still prepare payouts now. <a href={`#/org/${org.id}/topup`}>Add funds →</a>
+        </Callout>
+      )}
+      <Section flush title="Payouts" testid="payouts" actions={isOp && <a className="btn" data-testid="new-payout" href={`#/org/${org.id}/new`}>+ New payout</a>}>
         <Table
           cols={[{ label: "Title", primary: true }, { label: "Rows", className: "r" }, { label: "Amount", className: "r" }, { label: "Status" }, { label: "Created" }]}
           rows={(list.data ?? []).map((p) => ({ key: p.id, cells: [<a href={`#/payout/${p.id}`} className="cell-main">{p.title}</a>, <span className="num">{p.rows}</span>, <span className="num">{usdc(p.total)}</span>, <Badge s={p.status} />, date(p.created_at)] }))}
-          empty="No payouts yet."
+          empty={isOp ? <>No payouts yet. <a href={`#/org/${org.id}/new`}>Create the first one</a> from a spreadsheet or by typing a few rows.</> : "No payouts yet."}
         />
         <div style={{ padding: "0 20px" }}><Err e={list.error} /></div>
       </Section>
-      {isOp && open && (
-        <Section title="New payout from CSV" desc={<>Columns: <code>name,email,address,chain_id,amount[,category]</code>. A row without address and email waits for payment details. Chain — {chainName(org.chain_id)}, <code>chain_id</code> = {org.chain_id}.</>} testid="new-payout">
-          <Field label="Title"><input data-testid="payout-title" placeholder="e.g. September grants" value={title} onChange={(e) => setTitle(e.target.value)} /></Field>
-          <Field label="CSV rows"><textarea data-testid="payout-csv" value={csv} onChange={(e) => setCsv(e.target.value)} /></Field>
-          <Field label="Return unclaimed after, days" help={`Empty — as in settings: ${org.auto_refund_days ?? "never"}.`}>
-            <input className="w-amount" inputMode="numeric" value={override} onChange={(e) => setOverride(e.target.value)} />
-          </Field>
-          <div className="actions">
-            <button
-              data-testid="payout-create"
-              disabled={a.busy}
-              onClick={a.run(async () => {
-                const p = await call<{ id: string }>(auth.headers, "POST", `/orgs/${org.id}/payouts`, { title, csv, ...(override ? { autoRefundDays: Number(override) } : {}) });
-                window.location.hash = `#/payout/${p.id}`;
-              })}
-            >
-              Upload and review
-            </button>
-          </div>
-          <Err e={a.error} />
-        </Section>
-      )}
     </>
   );
 }
@@ -125,7 +104,7 @@ function Book({ org }: { org: Org }) {
               ...(isOp
                 ? [
                     <input data-testid={`pick-${e.name}`} className="w-amount" inputMode="decimal" placeholder="USDC" value={pick[e.id] ?? ""} onChange={(x) => setPick({ ...pick, [e.id]: x.target.value })} />,
-                    <button className="ghost sm" data-testid={`book-delete-${e.name}`} onClick={a.run(async () => { await call(auth.headers, "DELETE", `/orgs/${org.id}/address-book/${e.id}`); await book.reload(); })}>Delete</button>,
+                    <button className="ghost sm" data-testid={`book-delete-${e.name}`} onClick={a.run(async () => { if (!(await confirmAction({ title: `Delete ${e.name} from the address book?`, body: "Payments already sent are not affected.", confirm: "Delete", danger: true }))) return; await call(auth.headers, "DELETE", `/orgs/${org.id}/address-book/${e.id}`); await book.reload(); toast(`${e.name} deleted`); })}>Delete</button>,
                   ]
                 : []),
             ],
@@ -160,7 +139,7 @@ function Book({ org }: { org: Org }) {
             <Field label="or email"><input data-testid="book-email" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value.trim() })} /></Field>
           </div>
           <div className="actions" style={{ marginTop: 0 }}>
-            <button data-testid="book-save" disabled={!form.name || (!form.address && !form.email)} onClick={a.run(async () => { await call(auth.headers, "POST", `/orgs/${org.id}/address-book`, { ...form, chainId: org.chain_id, address: form.address || null, email: form.email || null }); setForm({ name: "", email: "", address: "", category: "" }); await book.reload(); })}>Save</button>
+            <button data-testid="book-save" disabled={!form.name || (!form.address && !form.email)} onClick={a.run(async () => { await call(auth.headers, "POST", `/orgs/${org.id}/address-book`, { ...form, chainId: org.chain_id, address: form.address || null, email: form.email || null }); toast(`${form.name} saved`); setForm({ name: "", email: "", address: "", category: "" }); await book.reload(); })}>Save</button>
           </div>
         </Section>
       )}
@@ -318,7 +297,7 @@ function Members({ org }: { org: Org }) {
               <span className="row"><span className="avatar">{m.email.slice(0, 1).toUpperCase()}</span><span className="cell-main" data-testid={`member-${m.email}`}>{m.email}</span></span>,
               <span className="row">{m.roles.map((r) => <span key={r} className="chip">{ROLE[r] ?? r}</span>)}</span>,
               <span className={`badge ${m.status === "active" ? "ok" : "warn"}`}>{m.status === "active" ? "active" : "invited"}</span>,
-              ...(isAdmin ? [m.roles.includes("operator") && !m.roles.includes("admin") ? <button className="ghost sm" data-testid={`remove-${m.email}`} onClick={a.run(async () => { await call(auth.headers, "DELETE", `/orgs/${org.id}/members/${encodeURIComponent(m.email)}`); await list.reload(); })}>Remove</button> : null] : []),
+              ...(isAdmin ? [m.roles.includes("operator") && !m.roles.includes("admin") ? <button className="ghost sm" data-testid={`remove-${m.email}`} onClick={a.run(async () => { if (!(await confirmAction({ title: `Remove ${m.email}?`, body: "They will no longer be able to prepare payouts for this organization.", confirm: "Remove", danger: true }))) return; await call(auth.headers, "DELETE", `/orgs/${org.id}/members/${encodeURIComponent(m.email)}`); await list.reload(); toast(`${m.email} removed`); })}>Remove</button> : null] : []),
             ],
           }))}
         />
@@ -327,7 +306,7 @@ function Members({ org }: { org: Org }) {
         <Section title="Invite an operator" desc="An operator prepares payouts but cannot sign them.">
           <div className="row">
             <input className="grow" data-testid="invite-email" type="email" placeholder="operator email" value={email} onChange={(e) => setEmail(e.target.value.trim())} />
-            <button data-testid="invite" disabled={!email} onClick={a.run(async () => { await call(auth.headers, "POST", `/orgs/${org.id}/members`, { email }); setEmail(""); await list.reload(); })}>Invite</button>
+            <button data-testid="invite" disabled={!email} onClick={a.run(async () => { await call(auth.headers, "POST", `/orgs/${org.id}/members`, { email }); toast(`Invitation sent to ${email}`); setEmail(""); await list.reload(); })}>Invite</button>
           </div>
         </Section>
       )}
@@ -350,7 +329,7 @@ function Settings({ org, onSaved }: { org: Org; onSaved: () => void }) {
         </Field>
         {isAdmin ? (
           <div className="actions" style={{ marginTop: 0 }}>
-            <button data-testid="settings-save" onClick={a.run(async () => { await call(auth.headers, "PATCH", `/orgs/${org.id}/settings`, { autoRefundDays: days ? Number(days) : null }); setSaved(true); onSaved(); })}>Save</button>
+            <button data-testid="settings-save" onClick={a.run(async () => { await call(auth.headers, "PATCH", `/orgs/${org.id}/settings`, { autoRefundDays: days ? Number(days) : null }); setSaved(true); toast("Settings saved"); onSaved(); })}>Save</button>
             {saved && <span className="badge ok" data-testid="settings-saved">saved</span>}
           </div>
         ) : (

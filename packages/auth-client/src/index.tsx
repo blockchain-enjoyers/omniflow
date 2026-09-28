@@ -17,6 +17,9 @@ export interface Auth {
   startLogin(email?: string): Promise<void>;
   verifyCode(code: string): Promise<void>;
   needsCode: boolean;
+  /** emulator: the email a code was sent to; go back to typing another email */
+  pendingEmail?: string | null;
+  resetLogin?(): void;
   logout(): Promise<void>;
   /** Authorization + privy-id-token headers for our API */
   headers(): Promise<Record<string, string>>;
@@ -136,6 +139,8 @@ function EmulatorAuth({ url, confirm, children }: { url: string; confirm?: (what
       mode: "emulator",
       ready: true,
       needsCode: pendingEmail !== null,
+      pendingEmail,
+      resetLogin: () => setPendingEmail(null),
       user: session?.user ?? null,
       startLogin: async (email) => {
         if (!email) throw new Error("email required");
@@ -173,6 +178,7 @@ export function LoginForm({ title, subtitle }: { title?: string; subtitle?: stri
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
   const [err, setErr] = useState("");
+  const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const run = (fn: () => Promise<void>) => async (e?: { preventDefault(): void }) => {
     e?.preventDefault();
@@ -194,13 +200,20 @@ export function LoginForm({ title, subtitle }: { title?: string; subtitle?: stri
         <div className="actions"><button className="block" onClick={run(() => auth.startLogin())}>Sign in with email or passkey</button></div>
       ) : !auth.needsCode ? (
         <form onSubmit={run(() => auth.startLogin(email))} style={{ marginTop: 12 }}>
-          <label className="field"><span>Email</span><input data-testid="login-email" type="email" autoComplete="email" placeholder="you@company.com" value={email} onChange={(e) => setEmail(e.target.value.trim())} /></label>
+          <label className="field"><span>Email</span><input data-testid="login-email" type="email" autoComplete="email" autoFocus placeholder="you@company.com" value={email} onChange={(e) => setEmail(e.target.value.trim())} /></label>
           <div className="actions"><button className="block" type="submit" data-testid="login-start" disabled={busy || !email}>Send code</button></div>
         </form>
       ) : (
         <form onSubmit={run(() => auth.verifyCode(code))} style={{ marginTop: 12 }}>
-          <label className="field"><span>Code from the email</span><input data-testid="login-code" inputMode="numeric" autoComplete="one-time-code" placeholder="6 digits" value={code} onChange={(e) => setCode(e.target.value.trim())} /></label>
-          <div className="actions"><button className="block" type="submit" data-testid="login-verify" disabled={busy || !code}>Sign in</button></div>
+          <p className="hint" style={{ marginBottom: 10 }}>We sent a 6-digit code to <b>{auth.pendingEmail}</b>.</p>
+          <label className="field"><span>Code from the email</span><input data-testid="login-code" inputMode="numeric" autoComplete="one-time-code" autoFocus placeholder="6 digits" value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))} /></label>
+          <div className="actions"><button className="block" type="submit" data-testid="login-verify" disabled={busy || code.length !== 6}>Sign in</button></div>
+          <p className="hint small" style={{ marginTop: 12, marginBottom: 0, textAlign: "center" }}>
+            <a href="#" data-testid="login-resend" onClick={(e) => { e.preventDefault(); void run(async () => { await auth.startLogin(auth.pendingEmail ?? email); setCode(""); setNote("A new code is on its way."); })(); }}>Send the code again</a>
+            {" · "}
+            <a href="#" data-testid="login-change" onClick={(e) => { e.preventDefault(); setCode(""); setNote(""); auth.resetLogin?.(); }}>Use a different email</a>
+          </p>
+          {note && <p className="hint small" style={{ textAlign: "center", marginBottom: 0 }}>{note}</p>}
         </form>
       )}
       {auth.mode === "emulator" && <p className="hint" style={{ marginTop: 12, marginBottom: 0 }}>Demo mode: your code arrives in the demo mailbox.</p>}

@@ -4,6 +4,8 @@ import { AuthProvider, LoginForm, useAuth } from "@omniflow/auth-client";
 import { Home } from "./pages/Home";
 import { SetupNew, SetupView } from "./pages/Setup";
 import { OrgPage } from "./pages/Org";
+import { NewPayout } from "./pages/NewPayout";
+import { ConfirmHost, Toaster } from "./ui";
 import { PayoutPage } from "./pages/Payout";
 import { ApprovePage } from "./pages/Approve";
 import { FormPage } from "./pages/Form";
@@ -144,6 +146,7 @@ function Shell() {
   let page = <Home />;
   if (parts[0] === "setup" && parts[1] === "new") page = <SetupNew />;
   else if (parts[0] === "setup" && parts[1]) page = <SetupView id={parts[1]} />;
+  else if (parts[0] === "org" && parts[1] && parts[2] === "new") page = <NewPayout orgId={parts[1]} />;
   else if (parts[0] === "org" && parts[1]) page = <OrgPage id={parts[1]} tab={parts[2] ?? "payouts"} />;
   else if (parts[0] === "payout" && parts[1]) page = <PayoutPage id={parts[1]} />;
   else if (parts[0] === "approve" && parts[1]) page = <ApprovePage batchId={parts[1]} />;
@@ -184,6 +187,8 @@ function App() {
     <AuthProvider config={MODE === "demo" ? { emulatorUrl: CONFIG.demo.authUrl, confirm: confirmSign } : { privyAppId: CONFIG.real.privyAppId }}>
       <Shell />
       <ConfirmDialog />
+      <ConfirmHost />
+      <Toaster />
     </AuthProvider>
   );
 }

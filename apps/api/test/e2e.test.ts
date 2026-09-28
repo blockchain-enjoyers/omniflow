@@ -189,9 +189,37 @@ describe.skipIf(!DB_URL)("sender side e2e (emulated Privy)", () => {
     expect(r.body.summary.notSent.map((n: { reason: string }) => n.reason).sort()).toEqual(["no-address-no-email", "other-chain"]);
   });
 
+  it("a payout needs a title and rows; CSV problems come back line by line; the preview saves nothing", async () => {
+    const csv = `name,amount,address\nAlice,10,${alice}`;
+    expect((await api.post(`/orgs/${orgId}/payouts`).set(ops.headers).send({ title: "  ", csv }).expect(400)).body.error).toBe("give the payout a title");
+    expect((await api.post(`/orgs/${orgId}/payouts`).set(ops.headers).send({ title: "x", csv: "name,amount\n" }).expect(400)).body.details.problems[0].message).toMatch(/no rows/);
+    const bad = await api.post(`/orgs/${orgId}/payouts`).set(ops.headers).send({ title: "x", csv: `Name;Amount;Wallet\nAlice;1,500;${alice}\nBob;5;0x12` }).expect(400);
+    expect(bad.body.details.problems.map((p: { line: number; column: string }) => [p.line, p.column])).toEqual([[2, "amount"], [3, "address"]]);
+    const before = (await api.get(`/orgs/${orgId}/payouts`).set(ops.headers).expect(200)).body.length;
+    const pv = (await api.post(`/orgs/${orgId}/payouts/preview`).set(ops.headers).send({ csv: `\uFEFFAmount;Name;Email\n1 500,50;Zoe;zoe@example.test\n3;Yan;` }).expect(201)).body;
+    expect(pv.errors).toEqual([]);
+    expect(pv.total).toBe("1503500000");
+    expect(pv.rows.map((r: { name: string; status: string }) => [r.name, r.status])).toEqual([["Zoe", "ready"], ["Yan", "waiting_details"]]);
+    expect((await api.get(`/orgs/${orgId}/payouts`).set(ops.headers).expect(200)).body.length).toBe(before); // nothing created
+    await api.post(`/orgs/${orgId}/payouts/preview`).set(a1.headers).send({ csv }).expect(403); // operators only
+    const manual = await api.post(`/orgs/${orgId}/payouts`).set(ops.headers).send({ title: "typed", rows: [{ name: "Kim", address: alice, amount: "2.5" }] }).expect(201);
+    expect((await api.get(`/payouts/${manual.body.id}/receipt`).set(ops.headers).expect(200)).body.rows[0]).toMatchObject({ name: "Kim", amount: "2500000", status: "ready" });
+    await api.post(`/payouts/${manual.body.id}/close`).set(ops.headers).expect(201); // keep the rest of the story unchanged
+  });
+
   it("freezing notifies every approver", async () => {
     batchId = (await api.post(`/payouts/${payoutId}/batches`).set(ops.headers).expect(201)).body.id;
     for (const a of [a1, a2, a3]) expect((await inbox(a.email))[0]!.subject).toMatch(/waiting for your approval/);
+  });
+
+  it("the approver's home lists what waits for their signature; the batch shows who has signed", async () => {
+    const mine = (await api.get("/me/approvals").set(a1.headers).expect(200)).body;
+    expect(mine).toHaveLength(1);
+    expect(mine[0]).toMatchObject({ batchId, org: "Acme DAO", title: "September grants", total: "6000500000" });
+    expect((await api.get("/me/approvals").set(ops.headers).expect(200)).body).toEqual([]); // not an approver
+    const b = (await api.get(`/payouts/${payoutId}/batches`).set(ops.headers).expect(200)).body[0];
+    expect(b).toMatchObject({ threshold: 2, signedWeight: 0 });
+    expect(b.signers.map((s: { email: string }) => s.email).sort()).toEqual([a1.email, a2.email, a3.email].sort());
   });
 
   it("an approver cannot pass off someone else's signature; operators cannot approve", async () => {
