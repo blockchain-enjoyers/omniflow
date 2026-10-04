@@ -196,12 +196,12 @@ class History {
     return (await api<{ rows: { row: string; name: string; status: string }[] }>(this.stack, this.ops, "GET", `/payouts/${payoutId}/receipt`)).rows;
   }
 
-  private async until(payoutId: string, done: (rows: { name: string; status: string }[]) => boolean) {
+  private async until(payoutId: string, done: (rows: { name: string; status: string }[]) => boolean, what = "") {
     for (let i = 0; i < 240; i++) {
       if (done(await this.rows(payoutId))) return;
       await new Promise((ok) => setTimeout(ok, 500));
     }
-    throw new Error(`demo history: payout did not settle: ${(await this.rows(payoutId)).map((r) => `${r.name} ${r.status}`).join(", ")}`);
+    throw new Error(`demo history: payout did not settle${what ? ` (${what})` : ""}: ${(await this.rows(payoutId)).map((r) => `${r.name} ${r.status}`).join(", ")}`);
   }
 
   /** A payout created, sent for approval, signed by two approvers and settled. */
@@ -240,8 +240,18 @@ class History {
     if (!link) throw new Error(`demo history: no new claim link for ${name}`);
     this.usedLinks.add(link.depositId);
     const deadline = BigInt((await this.chainTime()) + 3600);
-    await api(this.stack, null, "POST", "/claims", { escrow: link.escrow, depositId: link.depositId, recipient: u.wallet, deadline: deadline.toString(), signature: await signClaim(link, u.wallet, deadline) });
-    await this.until(payoutId, (rs) => rs.find((r) => r.name === name)?.status === "claimed");
+    const r = await api<{ txHash: Hex; ok: boolean }>(this.stack, null, "POST", "/claims", { escrow: link.escrow, depositId: link.depositId, recipient: u.wallet, deadline: deadline.toString(), signature: await signClaim(link, u.wallet, deadline) });
+    if (!r.ok) throw new Error(`demo history: ${name}'s claim was reverted on chain (${r.txHash})`);
+    const claimed = (rs: { name: string; status: string }[]) => rs.find((x) => x.name === name)?.status === "claimed";
+    // the scheduler's indexer marks the row; if it has not within ~20 s, run one pass of it here and say so in the log
+    for (let i = 0; i < 40 && !claimed(await this.rows(payoutId)); i++) await new Promise((ok) => setTimeout(ok, 500));
+    if (!claimed(await this.rows(payoutId))) {
+      const row = await this.stack.db.query(`SELECT deposit_id FROM payout_rows WHERE payout_id=$1 AND name=$2`, [payoutId, name]);
+      const cursor = await this.stack.db.query(`SELECT last_block FROM indexer_cursor`);
+      console.error(`demo history: ${name}'s claim ${r.txHash} not indexed after 20 s (link deposit ${link.depositId}, row deposit ${row.rows[0]?.deposit_id}, cursor ${cursor.rows[0]?.last_block}, head ${await this.stack.api.chain.blockNumber()}) — indexing here`);
+      await this.stack.api.payouts.pollEscrow(this.orgId);
+    }
+    await this.until(payoutId, claimed, `${name}'s claim ${r.txHash}`);
   }
 
   async run() {
