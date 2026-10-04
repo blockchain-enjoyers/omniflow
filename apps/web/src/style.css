@@ -116,3 +116,4 @@
 .trail { margin: 8px 0 0; font-size: 13px; color: var(--text-2); }
 .trail b { color: var(--text); font-weight: 600; }
 .batch-trail .cell-sub { overflow-wrap: anywhere; }
+@media (max-width: 720px) { .step { min-width: 0; font-size: 12px; } }
