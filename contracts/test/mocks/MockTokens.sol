@@ -11,8 +11,10 @@ contract MockUSDC is ERC20 {
         return "Mock USDC";
     }
 
+    /// The same symbol as the token it stands for: the dashboard, the reports and the claim page must name it alike.
+    /// name() still says it is a mock.
     function symbol() public pure override returns (string memory) {
-        return "mUSDC";
+        return "USDC";
     }
 
     function decimals() public pure override returns (uint8) {

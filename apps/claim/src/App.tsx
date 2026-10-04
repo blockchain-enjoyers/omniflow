@@ -3,12 +3,12 @@ import { formatUnits, isAddress, type Address, type EIP1193Provider } from "viem
 import { DepositStatus, parseClaimLink, type ClaimLink } from "@omniflow/shared";
 import { LoginForm, useAuth } from "@omniflow/auth-client";
 import { DEMO, DEMO_MAILBOX_URL, defaultRpc, RELAYER_URL } from "./config";
-import { claimViaRelayer, claimWithOwnWallet, readDeposit, type DepositView } from "./claim";
+import { CHAIN_NAMES, claimViaRelayer, claimWithOwnWallet, readDeposit, WrongNetworkError, type DepositView } from "./claim";
 
 // window.ethereum is typed `any` by the Privy SDK's globals; narrow it here.
 const injected = () => (window as unknown as { ethereum?: EIP1193Provider }).ethereum;
 
-type Phase = { kind: "idle" } | { kind: "working" } | { kind: "done"; recipient: string; hash: string } | { kind: "error"; message: string };
+type Phase = { kind: "idle" } | { kind: "working" } | { kind: "done"; recipient: string; hash: string } | { kind: "error"; message: string } | { kind: "wrong-network"; cancelled: boolean };
 
 export function App({ withLogin }: { withLogin: boolean }) {
   const link = useMemo<ClaimLink | Error>(() => {
@@ -47,8 +47,8 @@ export function App({ withLogin }: { withLogin: boolean }) {
     try {
       setPhase({ kind: "done", ...(await fn()) });
     } catch (e) {
-      const err = e as { shortMessage?: string; message?: string };
-      setPhase({ kind: "error", message: err.shortMessage ?? err.message ?? String(e) });
+      if (e instanceof WrongNetworkError) return setPhase({ kind: "wrong-network", cancelled: e.cancelled });
+      setPhase({ kind: "error", message: humanError(e) });
     }
   }
 
@@ -100,6 +100,15 @@ export function App({ withLogin }: { withLogin: boolean }) {
 
       {phase.kind === "working" && <div className="callout info">Sending…</div>}
       {phase.kind === "error" && <div className="callout bad" data-testid="error">Did not work: {phase.message}</div>}
+      {phase.kind === "wrong-network" && (
+        <div className="callout warn" data-testid="wrong-network">
+          <p style={{ marginTop: 0 }}>
+            Your wallet is on another network. This payment is on <b>{chainLabel(link.chainId)}</b>.{" "}
+            {phase.cancelled ? "The switch was cancelled in your wallet." : `If your wallet cannot switch by itself, choose ${chainLabel(link.chainId)} in it and try again.`}
+          </p>
+          <button data-testid="switch-network" onClick={() => run(() => claimWithOwnWallet(injected()!, link, rpc))}>Switch network and receive</button>
+        </div>
+      )}
       {phase.kind === "done" && (
         <section className="card done" data-testid="done">
           <div className="check">✓</div>
@@ -120,7 +129,15 @@ export function App({ withLogin }: { withLogin: boolean }) {
   );
 }
 
-const chainLabel = (id: number) => (DEMO ? "the demo network" : ({ 42161: "Arbitrum One", 421614: "Arbitrum Sepolia" })[id] ?? `chain ${id}`);
+const chainLabel = (id: number) => (DEMO ? "the demo network" : CHAIN_NAMES[id] ?? `chain ${id}`);
+
+/** Wallet and RPC errors in words a recipient can act on; the technical text only when nothing better is known. */
+function humanError(e: unknown): string {
+  const err = e as { code?: number; name?: string; shortMessage?: string; message?: string; cause?: { code?: number } };
+  if (err.code === 4001 || err.cause?.code === 4001 || err.name === "UserRejectedRequestError") return "you cancelled it in your wallet.";
+  if (/insufficient funds/i.test(err.message ?? "")) return "your wallet needs a little ETH on this network to pay for gas. The other ways to receive above need none.";
+  return err.shortMessage ?? err.message ?? String(e);
+}
 
 function Frame({ children }: { children: ReactNode }) {
   return (

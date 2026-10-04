@@ -54,6 +54,7 @@ describe("claim page without Omniflow", () => {
     const id = depositId(dep.account.address, "page-test", "row-1");
     await mintToken(stack, dep.account.address, 3_000_000_000n);
     const symbol = await pub.readContract({ address: stack.token, abi: erc20Abi, functionName: "symbol" });
+    expect(symbol).toBe("USDC"); // the dashboard and the reports call it USDC: one token, one name on every screen
     for (const h of [
       await dep.writeContract({ address: stack.token, abi: erc20Abi, functionName: "approve", args: [stack.escrow, 3_000_000_000n] }),
       await dep.writeContract({ address: stack.escrow, abi: claimEscrowAbi, functionName: "deposit", args: [id, stack.token, 3_000_000_000n, 0n, key.address, 0] }),
@@ -66,13 +67,23 @@ describe("claim page without Omniflow", () => {
     const page = await browser.newPage();
     const requests: string[] = [];
     page.on("request", (r) => requests.push(r.url()));
-    // Minimal EIP-1193 wallet: forwards to anvil, where the account is unlocked.
+    // Minimal EIP-1193 wallet: forwards to anvil, where the account is unlocked. It starts on Ethereum mainnet
+    // (0x1): the recipient's wallet is on another network, and the first switch request is cancelled by the person.
     await page.addInitScript(
       ([rpc, addr, chainHex]) => {
+        let current = "0x1";
+        let asked = 0;
         (window as unknown as { ethereum: unknown }).ethereum = {
           request: async ({ method, params }: { method: string; params?: unknown[] }) => {
             if (method === "eth_requestAccounts" || method === "eth_accounts") return [addr];
-            if (method === "eth_chainId") return chainHex;
+            if (method === "eth_chainId") return current;
+            if (method === "wallet_switchEthereumChain") {
+              if (++asked === 1) throw Object.assign(new Error("User rejected the request."), { code: 4001 });
+              const want = (params as { chainId: string }[])[0]!.chainId;
+              if (want !== chainHex) throw Object.assign(new Error("Unrecognized chain"), { code: 4902 });
+              current = want;
+              return null;
+            }
             const r = await fetch(rpc, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params: params ?? [] }) });
             const j = await r.json();
             if (j.error) throw new Error(j.error.message);
@@ -87,6 +98,11 @@ describe("claim page without Omniflow", () => {
 
     const before = await pub.readContract({ address: stack.token, abi: erc20Abi, functionName: "balanceOf", args: [recipient] });
     await page.getByTestId("claim-wallet").click();
+    await page.getByTestId("wrong-network").waitFor();
+    const said = (await page.getByTestId("wrong-network").textContent()) ?? "";
+    expect(said).toContain("Your wallet is on another network");
+    expect(said).not.toMatch(/viem|ChainMismatch|chain of the wallet/i); // words for a person, not a library's error
+    await page.getByTestId("switch-network").click();
     await page.getByTestId("done").waitFor({ timeout: 30_000 });
     const after = await pub.readContract({ address: stack.token, abi: erc20Abi, functionName: "balanceOf", args: [recipient] });
     expect(after - before).toBe(3_000_000_000n);
