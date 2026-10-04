@@ -610,7 +610,7 @@ describe.skipIf(!DB_URL)("the application through the browser", () => {
     const v = await newPage();
     await v.goto(`${stack.urls.web}/`);
     await v.getByTestId("landing").waitFor();
-    expect(await v.textContent("body")).toContain("What happens to the money");
+    expect(await v.textContent("body")).toContain("Stablecoin payouts for organizations that pay many people");
     expect(await v.getByTestId("source-link").count()).toBe(0); // no source URL configured, no dead link
     await shot(v, "landing");
     const t0 = Date.now();

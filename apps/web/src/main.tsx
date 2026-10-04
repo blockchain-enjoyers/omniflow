@@ -118,7 +118,7 @@ function Bare({ children }: { children: ReactNode }) {
 const SOURCE_URL = import.meta.env.VITE_SOURCE_URL || "";
 
 /**
- * The page a visitor lands on: what this is, for whom, what happens to the money — then a live example without
+ * The page a visitor lands on: what this is and for whom — then a live example without
  * signing up, or the choice between demo and real (always a choice).
  */
 function ModeChooser() {
@@ -133,14 +133,6 @@ function ModeChooser() {
           {SOURCE_URL && <a className="btn secondary" href={SOURCE_URL} target="_blank" rel="noreferrer" data-testid="source-link">Source on GitHub</a>}
         </div>
         {EXAMPLE_AVAILABLE && <p className="hint small">No sign-up. Test money on a demo network.</p>}
-      </section>
-      <section className="landing-money">
-        <h2>What happens to the money</h2>
-        <ol className="money-list">
-          <li><b>It stays in your organization's account.</b> A smart account controlled by your approvers: every payout needs their signatures, for example 2 of 3. Omniflow cannot move the money without them.</li>
-          <li><b>People with a wallet are paid straight to it.</b> The rest get an email link; the money waits in an escrow contract with no admin until they claim it — or until you take it back.</li>
-          <li><b>Every payment has a record:</b> who requested it, who approved it, and the transaction.</li>
-        </ol>
       </section>
       <section className="landing-modes">
         <h2>Start</h2>
