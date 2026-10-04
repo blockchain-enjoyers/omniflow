@@ -286,3 +286,14 @@ table.t tr.mine { background: var(--accent-soft); }
   .modal > .sheet { border-radius: var(--r-lg) var(--r-lg) 0 0; max-width: none; padding: 20px 16px calc(20px + env(safe-area-inset-bottom)); }
   .modal .actions > button { flex: 1; }
 }
+
+/* demo sign-in: ready accounts, one click each */
+.demo-accounts { margin-top: 12px; padding: 12px; border: 1px dashed var(--border-strong); border-radius: var(--r); background: var(--surface-2); }
+.demo-accounts-head { margin: 0 0 8px; font-size: 13px; color: var(--text-2); }
+.demo-accounts-head b { color: var(--text); }
+button.demo-account { display: grid; grid-template-columns: auto 1fr; grid-template-areas: "role email" "note note"; gap: 2px 10px; width: 100%; text-align: left; align-items: baseline; margin-top: 6px; padding: 10px 12px; background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+button.demo-account:hover { background: var(--accent-soft); border-color: var(--accent); }
+.demo-account-role { grid-area: role; font-weight: 600; }
+.demo-account-email { grid-area: email; font-family: var(--mono); font-size: 12px; color: var(--text-2); justify-self: end; overflow-wrap: anywhere; }
+.demo-account-note { grid-area: note; font-size: 12px; color: var(--text-2); font-weight: 400; }
+@media (max-width: 480px) { button.demo-account { grid-template-columns: 1fr; grid-template-areas: "role" "email" "note"; } .demo-account-email { justify-self: start; } }

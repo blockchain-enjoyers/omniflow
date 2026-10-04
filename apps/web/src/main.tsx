@@ -12,7 +12,7 @@ import { FormPage } from "./pages/Form";
 import { RecordPage } from "./pages/Record";
 import { TaxFormPage } from "./pages/TaxForm";
 import { Mailbox } from "./pages/Mailbox";
-import { AVAILABLE, chooseMode, CONFIG, EXAMPLE_AVAILABLE, isLiveExample, MODE, openLiveExample } from "./mode";
+import { AVAILABLE, chooseMode, CONFIG, demoCode, EXAMPLE_AVAILABLE, isLiveExample, MODE, openLiveExample } from "./mode";
 import "@omniflow/ui/base.css";
 import "./style.css";
 
@@ -68,9 +68,9 @@ const DemoBanner = () =>
   MODE === "demo" ? (
     <div className="demo-banner" data-testid="demo-banner">
       {isLiveExample() ? (
-        <><b>Live example</b> — your own copy on a demo network, test money only. Anna and Boris are simulated approvers: they sign after you do.</>
+        <><b>Live example</b> — your own copy on a demo network, test money only. Anna and Boris are simulated approvers: they sign after you do. Letters the app sends are in the <a href="#/demo/mailbox">demo mailbox</a>.</>
       ) : (
-        <><b>Demo mode</b> — test money on a demo network. Nothing here is real.</>
+        <><b>Demo mode</b> — test money on a demo network. Nothing here is real. No email leaves the demo: every letter the app sends is in the <a href="#/demo/mailbox" data-testid="banner-mailbox">demo mailbox</a>.</>
       )}
     </div>
   ) : null;
@@ -190,7 +190,7 @@ function Shell() {
           <p className="tagline">Stablecoin payouts: an organization pays many people, and each one receives the way that suits them.</p>
           <div className="card">
             {MODE === "demo" && <span className="badge warn" style={{ marginBottom: 10 }}>Demo mode</span>}
-            <LoginForm title="Sign in to the dashboard" />
+            <LoginForm title="Sign in to the dashboard" demo={MODE === "demo" ? { accounts: CONFIG.demo.accounts, code: demoCode, mailboxUrl: "#/demo/mailbox" } : undefined} />
           </div>
           {MODE === "demo" && EXAMPLE_AVAILABLE && (
             <div className="card" style={{ marginTop: 12 }}>

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { formatUnits, isAddress, type Address, type EIP1193Provider } from "viem";
 import { DepositStatus, parseClaimLink, type ClaimLink } from "@omniflow/shared";
 import { LoginForm, useAuth } from "@omniflow/auth-client";
-import { DEMO, DEMO_MAILBOX_URL, defaultRpc, RELAYER_URL } from "./config";
+import { DEMO, DEMO_CODE, DEMO_MAILBOX_URL, defaultRpc, RELAYER_URL } from "./config";
 import { CHAIN_NAMES, claimViaRelayer, claimWithOwnWallet, readDeposit, WrongNetworkError, type DepositView } from "./claim";
 
 // window.ethereum is typed `any` by the Privy SDK's globals; narrow it here.
@@ -160,7 +160,7 @@ function EmbeddedClaim({ busy, onClaim }: { busy: boolean; onClaim: (wallet: Add
       {!auth.user ? (
         <>
           <p className="hint" style={{ marginTop: 4 }}>Sign in with your email — a wallet is created for you, nothing to install.</p>
-          <LoginForm />
+          <LoginForm demo={DEMO_CODE ? { code: DEMO_CODE, mailboxUrl: DEMO_MAILBOX_URL } : undefined} />
           {DEMO_MAILBOX_URL && <p className="hint small" style={{ marginTop: 8, marginBottom: 0 }}><a href={DEMO_MAILBOX_URL} target="_blank" rel="noreferrer">Open the demo mailbox</a> to read the code.</p>}
         </>
       ) : !auth.user.wallet ? (

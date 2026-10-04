@@ -40,6 +40,8 @@ export interface StackOptions {
   log?: (s: string) => void;
   /** "Open a live example": per-visitor sandboxes (example.ts); `pool` = how many are kept ready in advance */
   liveExamples?: { pool: number; deferStart?: boolean };
+  /** demo sign-in screen: ready accounts (email, role, what they will see) */
+  demoAccounts?: { email: string; role: string; note?: string }[];
   /** local chain only: unix time of the first block (the demo history starts months ago and catches up to today) */
   chainStart?: number;
 }
@@ -171,7 +173,7 @@ export async function startStack(o: StackOptions): Promise<RunningStack> {
     webApp.use(
       express.static(
         // demo mode is served here; real mode appears when VITE_API_URL and VITE_PRIVY_APP_ID are in the environment
-        buildFrontend("web", { VITE_DEMO_API_URL: apiUrl, VITE_DEMO_AUTH_URL: privyUrl, ...(o.liveExamples ? { VITE_DEMO_EXAMPLE_URL: `${webUrl}/demo/example` } : {}) }),
+        buildFrontend("web", { VITE_DEMO_API_URL: apiUrl, VITE_DEMO_AUTH_URL: privyUrl, ...(o.demoAccounts ? { VITE_DEMO_ACCOUNTS: JSON.stringify(o.demoAccounts) } : {}), ...(o.liveExamples ? { VITE_DEMO_EXAMPLE_URL: `${webUrl}/demo/example` } : {}) }),
       ),
     );
     claimApp.use(

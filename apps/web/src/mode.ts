@@ -10,7 +10,7 @@ export type Mode = "demo" | "real";
 
 const env = import.meta.env;
 export const CONFIG = {
-  demo: { api: env.VITE_DEMO_API_URL || "", authUrl: env.VITE_DEMO_AUTH_URL || "", exampleUrl: env.VITE_DEMO_EXAMPLE_URL || "" },
+  demo: { api: env.VITE_DEMO_API_URL || "", authUrl: env.VITE_DEMO_AUTH_URL || "", exampleUrl: env.VITE_DEMO_EXAMPLE_URL || "", accounts: parseAccounts(env.VITE_DEMO_ACCOUNTS) },
   real: { api: env.VITE_API_URL || "", privyAppId: env.VITE_PRIVY_APP_ID || "", explorerUrl: env.VITE_EXPLORER_URL || "" },
 };
 export const AVAILABLE: Record<Mode, boolean> = {
@@ -97,4 +97,21 @@ export const EXAMPLE_AVAILABLE = AVAILABLE.demo && Boolean(CONFIG.demo.exampleUr
 export function explorerLink(kind: "tx" | "address", v: string): string | null {
   const base = MODE === "real" ? CONFIG.real.explorerUrl : "";
   return base ? `${base.replace(/\/$/, "")}/${kind}/${v}` : null;
+}
+
+function parseAccounts(raw?: string): { email: string; role: string; note?: string }[] {
+  try {
+    const a = JSON.parse(raw || "[]");
+    return Array.isArray(a) ? a.filter((x) => x && typeof x.email === "string" && typeof x.role === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Demo mode: no real email is sent — the newest sign-in code for an address, read from the demo mailbox. */
+export async function demoCode(email: string): Promise<string | null> {
+  const r = await fetch(`${CONFIG.demo.api.replace(/\/$/, "")}/dev/mailbox?to=${encodeURIComponent(email)}`);
+  if (!r.ok) return null;
+  const mails = (await r.json()) as { subject: string }[];
+  return mails.map((m) => m.subject.match(/\b\d{6}\b/)?.[0]).find(Boolean) ?? null;
 }

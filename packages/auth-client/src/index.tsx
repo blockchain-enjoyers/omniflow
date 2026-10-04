@@ -15,7 +15,8 @@ export interface Auth {
   user: AuthUser | null;
   /** emulator: two steps (email → code); privy: opens Privy's own modal */
   startLogin(email?: string): Promise<void>;
-  verifyCode(code: string): Promise<void>;
+  /** `email`: when the code is for an address just passed to startLogin (state may not have caught up yet) */
+  verifyCode(code: string, email?: string): Promise<void>;
   needsCode: boolean;
   /** emulator: the email a code was sent to; go back to typing another email */
   pendingEmail?: string | null;
@@ -155,8 +156,8 @@ function EmulatorAuth({ url, confirm, children }: { url: string; confirm?: (what
         await post("/auth/email/start", { email });
         setPendingEmail(email);
       },
-      verifyCode: async (code) => {
-        const r = await post("/auth/email/verify", { email: pendingEmail, code });
+      verifyCode: async (code, email) => {
+        const r = await post("/auth/email/verify", { email: email ?? pendingEmail, code });
         setPendingEmail(null);
         setSession({ accessToken: r.accessToken, identityToken: r.identityToken, user: r.user });
       },
@@ -181,13 +182,42 @@ function EmulatorAuth({ url, confirm, children }: { url: string; confirm?: (what
 }
 
 /** Login form that works for both modes. Styled by @omniflow/ui/base.css. */
-export function LoginForm({ title, subtitle }: { title?: string; subtitle?: string }) {
+/**
+ * Demo mode only: ready accounts to sign in with one click, and the sign-in code taken from the demo mailbox
+ * (no real email is sent in demo mode). `code` returns the newest code sent to an address, or null.
+ */
+export interface DemoLogin {
+  accounts?: { email: string; role: string; note?: string }[];
+  code: (email: string) => Promise<string | null>;
+  mailboxUrl?: string;
+}
+
+export function LoginForm({ title, subtitle, demo }: { title?: string; subtitle?: string; demo?: DemoLogin }) {
   const auth = useAuth();
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
   const [err, setErr] = useState("");
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
+  // demo: once a code has been sent, fill it in from the demo mailbox
+  useEffect(() => {
+    if (!demo || !auth.needsCode || !auth.pendingEmail || code) return;
+    let alive = true;
+    void demo.code(auth.pendingEmail).then((c) => {
+      if (alive && c) setCode(c);
+    });
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [demo, auth.needsCode, auth.pendingEmail]);
+  const oneClick = (email: string) =>
+    run(async () => {
+      await auth.startLogin(email);
+      const c = await demo!.code(email);
+      if (!c) throw new Error("no code in the demo mailbox yet — try again");
+      await auth.verifyCode(c, email);
+    });
   const run = (fn: () => Promise<void>) => async (e?: { preventDefault(): void }) => {
     e?.preventDefault();
     setErr("");
@@ -207,10 +237,25 @@ export function LoginForm({ title, subtitle }: { title?: string; subtitle?: stri
       {auth.mode === "privy" ? (
         <div className="actions"><button className="block" onClick={run(() => auth.startLogin())}>Sign in with email or passkey</button></div>
       ) : !auth.needsCode ? (
+        <>
+        {demo?.accounts && demo.accounts.length > 0 && (
+          <div className="demo-accounts" data-testid="demo-accounts">
+            <p className="demo-accounts-head"><b>Demo accounts</b> — no sign-up and no real email. Pick one to sign in:</p>
+            {demo.accounts.map((a) => (
+              <button key={a.email} type="button" className="demo-account" data-testid={`demo-account-${a.email}`} disabled={busy} onClick={() => void oneClick(a.email)()}>
+                <span className="demo-account-role">{a.role}</span>
+                <span className="demo-account-email">{a.email}</span>
+                {a.note && <span className="demo-account-note">{a.note}</span>}
+              </button>
+            ))}
+            <p className="hint small" style={{ margin: "8px 0 0" }}>Or type any email below — a new person with no organization yet.</p>
+          </div>
+        )}
         <form onSubmit={run(() => auth.startLogin(email))} style={{ marginTop: 12 }}>
           <label className="field"><span>Email</span><input data-testid="login-email" type="email" autoComplete="email" autoFocus placeholder="you@company.com" value={email} onChange={(e) => setEmail(e.target.value.trim())} /></label>
           <div className="actions"><button className="block" type="submit" data-testid="login-start" disabled={busy || !email}>Send code</button></div>
         </form>
+        </>
       ) : (
         <form onSubmit={run(() => auth.verifyCode(code))} style={{ marginTop: 12 }}>
           <p className="hint" style={{ marginBottom: 10 }}>We sent a 6-digit code to <b>{auth.pendingEmail}</b>.</p>
@@ -224,7 +269,12 @@ export function LoginForm({ title, subtitle }: { title?: string; subtitle?: stri
           {note && <p className="hint small" style={{ textAlign: "center", marginBottom: 0 }}>{note}</p>}
         </form>
       )}
-      {auth.mode === "emulator" && <p className="hint" style={{ marginTop: 12, marginBottom: 0 }}>Demo mode: your code arrives in the demo mailbox.</p>}
+      {auth.mode === "emulator" && (
+        <p className="hint" style={{ marginTop: 12, marginBottom: 0 }} data-testid="demo-mail-note">
+          Demo mode: no real email is sent. The code and every letter the app sends go to the {demo?.mailboxUrl ? <a href={demo.mailboxUrl} target="_blank" rel="noreferrer">demo mailbox</a> : "demo mailbox"}
+          {demo ? " — the code is filled in for you." : "."} In real mode the code arrives by email.
+        </p>
+      )}
       {err && <p className="error">{err}</p>}
     </div>
   );

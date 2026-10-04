@@ -18,6 +18,14 @@ export const DEMO = {
   forms: "finance@demo.test",
 };
 
+/** Who a visitor can sign in as, and what each one will see (the sign-in screen lists them). */
+export const demoAccounts = (history: boolean) => [
+  { email: DEMO.operator, role: "Operator and admin", note: history ? "prepares payouts; three months of payouts, reports, tax forms" : "prepares payouts" },
+  { email: DEMO.approvers[1]!, role: "Approver", note: history ? "the October payout is waiting for this signature" : "signs payouts" },
+  { email: DEMO.approvers[2]!, role: "Approver", note: history ? "can also sign the October payout" : "signs payouts" },
+  { email: DEMO.approvers[0]!, role: "Approver", note: history ? "already signed October" : "signs payouts" },
+];
+
 /** The history starts this many days ago (local chain only: anvil's first block is put there). */
 export const HISTORY_DAYS = 98;
 const DAY = 86_400;

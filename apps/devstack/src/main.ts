@@ -1,4 +1,4 @@
-import { DEMO, HISTORY_DAYS, seedDemo } from "./seed.js";
+import { DEMO, demoAccounts, HISTORY_DAYS, seedDemo } from "./seed.js";
 import { startStack } from "./stack.js";
 
 /**
@@ -29,6 +29,7 @@ const stack = await startStack({
   liveExamples: process.env.EXAMPLES === "0" ? undefined : { pool: Number(process.env.EXAMPLE_POOL ?? 2), deferStart: true },
   // the demo history happens on past dates: the local chain starts that many days ago and catches up to today
   chainStart: seeding && history ? Math.floor(Date.now() / 1000) - HISTORY_DAYS * 86_400 : undefined,
+  demoAccounts: seeding ? demoAccounts(history) : undefined,
 });
 
 let demo: Awaited<ReturnType<typeof seedDemo>> | null = null;

@@ -24,3 +24,14 @@ export const PRIVY_APP_ID: string | undefined = DEMO ? undefined : env.VITE_PRIV
 export const DEMO_AUTH_URL: string | undefined = DEMO ? env.VITE_DEMO_AUTH_URL : undefined;
 /** where demo sign-in codes can be read */
 export const DEMO_MAILBOX_URL: string | undefined = DEMO ? env.VITE_DEMO_MAILBOX_URL || undefined : undefined;
+
+/** Demo mode: no real email is sent — the newest sign-in code for an address, read from the demo mailbox via the API. */
+export const DEMO_CODE: ((email: string) => Promise<string | null>) | undefined =
+  DEMO && env.VITE_DEMO_RELAYER_URL
+    ? async (email) => {
+        const r = await fetch(`${env.VITE_DEMO_RELAYER_URL!.replace(/\/$/, "")}/dev/mailbox?to=${encodeURIComponent(email)}`);
+        if (!r.ok) return null;
+        const mails = (await r.json()) as { subject: string }[];
+        return mails.map((m) => m.subject.match(/\b\d{6}\b/)?.[0]).find(Boolean) ?? null;
+      }
+    : undefined;
