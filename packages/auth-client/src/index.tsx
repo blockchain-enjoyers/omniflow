@@ -199,18 +199,21 @@ export function LoginForm({ title, subtitle, demo }: { title?: string; subtitle?
   const [err, setErr] = useState("");
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
-  // demo: once a code has been sent, fill it in from the demo mailbox
+  // demo: once a code has been sent, fill it in from the demo mailbox. `demo` is a new object on every render,
+  // so it is read through a ref — depending on it would cancel the lookup before the code arrives.
+  const demoRef = useRef(demo);
+  demoRef.current = demo;
   useEffect(() => {
-    if (!demo || !auth.needsCode || !auth.pendingEmail || code) return;
+    const d = demoRef.current;
+    if (!d || !auth.needsCode || !auth.pendingEmail) return;
     let alive = true;
-    void demo.code(auth.pendingEmail).then((c) => {
-      if (alive && c) setCode(c);
+    void d.code(auth.pendingEmail).then((c) => {
+      if (alive && c) setCode((cur) => cur || c);
     });
     return () => {
       alive = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [demo, auth.needsCode, auth.pendingEmail]);
+  }, [auth.needsCode, auth.pendingEmail]);
   const oneClick = (email: string) =>
     run(async () => {
       await auth.startLogin(email);

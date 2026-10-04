@@ -216,12 +216,28 @@ class History {
   }
 
   /** The recipient opens the newest claim link and receives through the relayer, as the claim page does. */
+  private readonly usedLinks = new Set<string>();
+
+  /** The recipient opens the link of this payout and receives through the relayer, as the claim page does. */
   private async claim(name: string, payoutId: string) {
     const u = await this.recipient(name);
-    const letter = (await readDevMailbox(this.stack.db, this.person(name))).find((m) => /you have been sent a payment/i.test(m.subject));
-    const url = letter?.body.match(/https?:\/\/\S+#\S+/)?.[0];
-    if (!url) throw new Error(`demo history: no claim link for ${name}`);
-    const link = parseClaimLink(url);
+    // the letter is sent once the batch settles — it can arrive a moment after the row's status changes,
+    // so wait for a link that has not been used yet rather than take whatever letter is newest
+    let link: ReturnType<typeof parseClaimLink> | null = null;
+    for (let i = 0; i < 120 && !link; i++) {
+      for (const m of await readDevMailbox(this.stack.db, this.person(name))) {
+        const url = /you have been sent a payment/i.test(m.subject) ? m.body.match(/https?:\/\/\S+#\S+/)?.[0] : undefined;
+        if (!url) continue;
+        const l = parseClaimLink(url);
+        if (!this.usedLinks.has(l.depositId)) {
+          link = l;
+          break;
+        }
+      }
+      if (!link) await new Promise((ok) => setTimeout(ok, 500));
+    }
+    if (!link) throw new Error(`demo history: no new claim link for ${name}`);
+    this.usedLinks.add(link.depositId);
     const deadline = BigInt((await this.chainTime()) + 3600);
     await api(this.stack, null, "POST", "/claims", { escrow: link.escrow, depositId: link.depositId, recipient: u.wallet, deadline: deadline.toString(), signature: await signClaim(link, u.wallet, deadline) });
     await this.until(payoutId, (rs) => rs.find((r) => r.name === name)?.status === "claimed");
