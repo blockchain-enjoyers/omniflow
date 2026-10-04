@@ -55,16 +55,17 @@ function Documents({ payoutId, row, rowId, d, onChange }: { payoutId: string; ro
       <dd className="docs" data-testid="documents">
         <div className="doc-row">
           <span className="doc-k">Form on file</span>
-          <span className="doc-v" data-testid="form-on-file">{onFile}</span>
+          <span className="doc-v">
+            <span data-testid="form-on-file">{onFile}</span>
+            {/* the file went to the payer by email; Omniflow does not keep it */}
+            {d.status === "received" && <span className="hint small doc-sub" data-testid="form-sent-to">Sent to {d.destination} by email</span>}
+          </span>
           <span className="doc-a">
             {d.status === "received" ? (
-              // the file went to the payer by email; Omniflow does not keep it. The demo mailbox does: there it opens here.
-              <span className="row">
-                <span className="hint small" data-testid="form-sent-to">Sent to {d.destination} by email</span>
-                {MODE === "demo" && d.hash && (
-                  <a className="btn secondary sm" data-testid="form-download" href={`${CONFIG.demo.api.replace(/\/$/, "")}/dev/forms/${d.hash}`} title="The copy that reached the finance email (demo mailbox)">Download form</a>
-                )}
-              </span>
+              // the demo mailbox keeps the copy the finance email got: there it opens here
+              MODE === "demo" && d.hash ? (
+                <a className="btn secondary sm" data-testid="form-download" href={`${CONFIG.demo.api.replace(/\/$/, "")}/dev/forms/${d.hash}`} title="The copy that reached the finance email (demo mailbox)">Download form</a>
+              ) : null
             ) : !asking ? (
               <button className="secondary sm" data-testid="request-form" disabled={!d.canRequest.ok} title={d.canRequest.reason} onClick={() => setAsking(true)}>Request a form</button>
             ) : (
