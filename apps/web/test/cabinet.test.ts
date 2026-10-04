@@ -626,15 +626,24 @@ describe.skipIf(!DB_URL)("the application through the browser", () => {
     expect(await text(v, "status-Frank")).toContain("returned");
     expect(await text(v, "trail")).toMatch(/Requested by you-\w+@example\.test · approved by anna-\w+@example\.test, boris-\w+@example\.test/);
     await shot(v, "live-example");
+    const examplePayout = v.url();
     const orgHref = await v.locator("a.back").getAttribute("href");
     await v.goto(`${demoUrl()}${orgHref}/reports`);
     await expect.poll(() => v.textContent("body")).toContain("Frank");
     await shot(v, "live-example-reports");
-    // documents come with it: Alice's W-9 is on file, so her 1099-NEC is one click away; Carol's W-8BEN is asked for
+    // documents come with it: W-9s from Alice and Maya (1099-NEC one click away), W-8s from Bruno and Kite Labs, Carol asked
     expect(await v.getByTestId("year-end").isDisabled()).toBe(false);
     await v.getByTestId("year-end").click();
     await v.getByTestId("tin-Alice").waitFor();
-    expect(await v.getByTestId("tin-Carol").count()).toBe(0);
+    await v.getByTestId("tin-Maya").waitFor();
+    for (const not of ["Carol", "Bruno", "Kite Labs Ltd"]) expect(await v.getByTestId(`tin-${not}`).count()).toBe(0);
+    // demo: the received form opens from the record — the copy the finance email got
+    await v.goto(examplePayout);
+    await v.getByTestId("record-Bruno").click();
+    expect(await text(v, "form-on-file")).toContain("W-8BEN");
+    const [form] = await Promise.all([v.waitForEvent("download"), v.getByTestId("form-download").click()]);
+    expect(readFileSync((await form.path())!).subarray(0, 5).toString("latin1")).toBe("%PDF-");
+    expect(form.suggestedFilename()).toMatch(/W-8BEN.*Bruno/);
 
     // a payout of their own: they sign, the simulated approver signs after them, the money goes
     await v.goto(`${demoUrl()}${orgHref}/new`);

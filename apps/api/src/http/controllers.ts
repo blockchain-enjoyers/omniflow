@@ -21,7 +21,7 @@ import {
 import type { Address, Hex } from "viem";
 import { getAddress } from "viem";
 import type pg from "pg";
-import { readDevAttachment, readDevMailbox } from "@omniflow/devmail";
+import { findDevAttachment, readDevAttachment, readDevMailbox } from "@omniflow/devmail";
 import { HttpError, PayoutService } from "../payouts/service.js";
 import type { RowInput } from "../payouts/csv.js";
 import type { ChainClient } from "../chain/chain.js";
@@ -320,6 +320,16 @@ export class DevController {
   async attachment(@Param("id") id: string, @Param("n") n: string) {
     if (!this.extra.devEndpoints) throw new HttpError(404, "not found");
     const a = await readDevAttachment(this.db, id, Number(n));
+    if (!a) throw new HttpError(404, "not found");
+    return new StreamableFile(a.content, { type: a.contentType, disposition: `attachment; filename="${a.filename}"` });
+  }
+
+  /** a received form, as the payer's finance email got it — found by the fingerprint on the payment row */
+  @Get("forms/:sha256")
+  async form(@Param("sha256") sha256: string) {
+    if (!this.extra.devEndpoints) throw new HttpError(404, "not found");
+    if (!/^[0-9a-f]{64}$/.test(sha256)) throw new HttpError(404, "not found");
+    const a = await findDevAttachment(this.db, sha256);
     if (!a) throw new HttpError(404, "not found");
     return new StreamableFile(a.content, { type: a.contentType, disposition: `attachment; filename="${a.filename}"` });
   }

@@ -2,6 +2,7 @@ import { getAddress, keccak256, toHex, type Address, type Hex } from "viem";
 import { parseClaimLink, signClaim } from "@omniflow/shared";
 import { mintToken } from "@omniflow/devchain";
 import { readDevMailbox } from "@omniflow/devmail";
+import { signedForm } from "./forms.js";
 import type { RunningStack } from "./stack.js";
 
 /**
@@ -287,7 +288,7 @@ class History {
       await api(this.stack, this.ops, "POST", `/payouts/${september}/rows/${carol}/document-request`, { type: "w9" });
       const letter = (await readDevMailbox(this.stack.db, this.person("Carol"))).find((m) => /needs a tax form/.test(m.subject))!;
       const token = letter.body.match(/#\/tax-form\/(\S+)/)![1]!;
-      await api(this.stack, null, "POST", `/tax-forms/${token}`, { type: "w9", filename: "W-9 Carol.pdf", contentBase64: Buffer.from(SIGNED_FORM).toString("base64") });
+      await api(this.stack, null, "POST", `/tax-forms/${token}`, { type: "w9", filename: "W-9 Carol.pdf", contentBase64: (await signedForm("w9", "Carol")).toString("base64") });
       const erin = (await this.rows(august)).find((r) => r.name === "Erin")!.row;
       await api(this.stack, this.ops, "POST", `/payouts/${august}/rows/${erin}/document-request`, { type: "w8ben" });
     });
@@ -311,12 +312,3 @@ class History {
     this.made["October contributors"] = oct.id;
   }
 }
-
-/** A stand-in for a signed W-9 the recipient scanned: a minimal valid PDF. */
-export const SIGNED_FORM = `%PDF-1.4
-1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
-2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj
-3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >> endobj
-trailer << /Root 1 0 R >>
-%%EOF
-`;

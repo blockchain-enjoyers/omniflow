@@ -74,6 +74,13 @@ export async function readDevMailbox(db: pg.Pool, to?: string, limit = 50) {
   return rows as { id: string; to_addr: string; from_name: string; subject: string; body: string; sent_at: Date; attachments: StoredAttachment[] }[];
 }
 
+/** The newest attachment with this SHA-256: a received form, found by the fingerprint its payment row keeps. */
+export async function findDevAttachment(db: pg.Pool, sha256: string) {
+  const { rows } = await db.query(`SELECT id, attachments FROM dev_mailbox WHERE attachments @> $1::jsonb ORDER BY id DESC LIMIT 1`, [JSON.stringify([{ sha256 }])]);
+  if (!rows[0]) return null;
+  return readDevAttachment(db, rows[0].id, (rows[0].attachments as StoredAttachment[]).findIndex((a) => a.sha256 === sha256));
+}
+
 /** One attachment of one letter, from disk. */
 export async function readDevAttachment(db: pg.Pool, id: string, n: number) {
   const { rows } = await db.query(`SELECT attachments FROM dev_mailbox WHERE id=$1`, [id]);

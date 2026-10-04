@@ -17,6 +17,7 @@
     "@omniflow/shared": "0.1.0",
     "@omniflow/zerodev-emulator": "0.1.0",
     "express": "5.2.1",
+    "pdf-lib": "1.17.1",
     "pg": "8.23.0",
     "viem": "2.56.9"
   },

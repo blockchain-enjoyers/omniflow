@@ -1,6 +1,7 @@
 import { Fragment, useState } from "react";
 import { useAuth } from "@omniflow/auth-client";
 import { call, downloadBinary, FORM_LABEL, type FormType, type RecordLine, type RecordView, type RowDocuments } from "../api";
+import { CONFIG, MODE } from "../mode";
 import { Err, Section, toast, useAction, useLoad } from "../ui";
 
 const Value = ({ v }: { v: RecordLine["values"][number] }) => (
@@ -57,8 +58,13 @@ function Documents({ payoutId, row, rowId, d, onChange }: { payoutId: string; ro
           <span className="doc-v" data-testid="form-on-file">{onFile}</span>
           <span className="doc-a">
             {d.status === "received" ? (
-              // the file went to the payer by email; Omniflow does not keep it, so there is nothing to download here
-              <span className="hint small" data-testid="form-sent-to">Sent to {d.destination} by email</span>
+              // the file went to the payer by email; Omniflow does not keep it. The demo mailbox does: there it opens here.
+              <span className="row">
+                <span className="hint small" data-testid="form-sent-to">Sent to {d.destination} by email</span>
+                {MODE === "demo" && d.hash && (
+                  <a className="btn secondary sm" data-testid="form-download" href={`${CONFIG.demo.api.replace(/\/$/, "")}/dev/forms/${d.hash}`} title="The copy that reached the finance email (demo mailbox)">Download form</a>
+                )}
+              </span>
             ) : !asking ? (
               <button className="secondary sm" data-testid="request-form" disabled={!d.canRequest.ok} title={d.canRequest.reason} onClick={() => setAsking(true)}>Request a form</button>
             ) : (
