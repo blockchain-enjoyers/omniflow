@@ -64,7 +64,7 @@ export interface Review {
 }
 export interface ReceiptRow { row: string; name: string; email: string | null; address: string | null; amount: string; status: string; executed: boolean; failReason: string | null; txHash: string | null; depositId: string | null }
 export interface Receipt { payout: { id: string; title: string; status: string; closedAt: string | null; orgId: string; chainId: number }; rows: ReceiptRow[] }
-export interface Batch { id: string; batch_no: number; kind: string; status: string; approve_hash: string; tx_hash: string | null; created_at: string; threshold: number; signedWeight: number; signers: Signer[] }
+export interface Batch { id: string; batch_no: number; kind: string; status: string; approve_hash: string; tx_hash: string | null; created_at: string; requested_by: string | null; threshold: number; signedWeight: number; signers: Signer[] }
 export type NextStep =
   | { step: "approve"; typedData: unknown; manifest: Manifest }
   | { step: "final"; userOpHash: Hex; manifest: Manifest }
@@ -76,4 +76,15 @@ export interface Problem { line: number; column?: string; message: string }
 export interface PreviewRow { line: number; name: string; email?: string; address?: string; chainId: number; amount: string; category?: string; status: "ready" | "waiting_details" | "other_chain" }
 export interface Preview { rows: PreviewRow[]; errors: Problem[]; warnings: Problem[]; total: string; chainId: number }
 export interface PendingApproval { batchId: string; kind: string; payoutId: string; title: string; orgId: string; org: string; rows: number; total: string; createdAt: string }
-export interface Signer { address: string; weight: number; email: string | null; signed: boolean }
+export interface Signer { address: string; weight: number; email: string | null; signed: boolean; signedAt: string | null }
+
+/** Saves what the API returns (a CSV, a payment record) as a file — the API needs the sign-in headers, so no plain link. */
+export async function download(headers: Headers, path: string, filename: string, type: string) {
+  const text = await call<string>(headers, "GET", path);
+  const url = URL.createObjectURL(new Blob([text], { type }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}

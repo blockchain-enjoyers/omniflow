@@ -147,6 +147,8 @@ export class LiveExamples {
 
   private async buildOne(): Promise<Example> {
     const id = randomBytes(3).toString("hex");
+    const t0 = Date.now();
+    const step = (s: string) => this.o.log?.(`live example ${id}: ${s} at ${Date.now() - t0} ms`);
     const mail = (who: string) => `${who}-${id}@example.test`;
     const guest = await this.login(mail("you"));
     const anna = await this.login(mail("anna"));
@@ -163,6 +165,7 @@ export class LiveExamples {
     }
     if (last?.status !== "deployed") throw new Error(`example setup ended in ${last?.status}`);
     const orgId = last.orgId;
+    step("account deployed");
     await mintToken(this.stack.chain.rpcUrl, this.stack.chain.token, last.account, 100_000_000_000n);
 
     // Batch 1 with a one-day deadline: Alice by address, Frank by email link
@@ -182,11 +185,13 @@ export class LiveExamples {
     await this.sign(boris, b1.id);
     await this.settled(guest, p.id, (rows) => rows.find((r) => r.name === "Alice")?.status === "sent" && rows.find((r) => r.name === "Frank")?.status === "in_escrow");
 
+    step("batch 1 settled");
     // Frank's day passes on the demo chain; the scheduler's keeper returns his deposit (it judges by chain time)
     await this.rpc("evm_increaseTime", [DAY + 120]);
     await this.rpc("evm_mine", []);
     await this.settled(guest, p.id, (rows) => rows.find((r) => r.name === "Frank")?.status === "refunded");
 
+    step("Frank refunded");
     // Batch 2 without a deadline: Carol by email link
     await this.api(guest, "PATCH", `/orgs/${orgId}/settings`, { autoRefundDays: null });
     await this.api(guest, "POST", `/payouts/${p.id}/rows`, { name: "Carol", email: mail("carol"), amount: "800", chainId: this.stack.chain.chainId, category: "contractors" });
@@ -195,6 +200,7 @@ export class LiveExamples {
     await this.sign(boris, b2.id);
     await this.settled(guest, p.id, (rows) => rows.find((r) => r.name === "Carol")?.status === "in_escrow");
 
+    step("batch 2 settled");
     // the notifications of the build were for the simulated approvers; the visitor starts with a clean inbox
     await this.stack.db.query(`DELETE FROM dev_mailbox WHERE to_addr = ANY($1)`, [[mail("you"), mail("anna"), mail("boris")]]);
     this.o.log?.(`live example ${id} ready`);

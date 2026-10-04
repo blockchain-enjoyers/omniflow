@@ -207,3 +207,9 @@ ALTER TABLE payout_rows ADD COLUMN IF NOT EXISTS claimed_at timestamptz;
 ALTER TABLE payout_rows ADD COLUMN IF NOT EXISTS rekey_pending boolean NOT NULL DEFAULT false;
 ALTER TABLE payouts ADD COLUMN IF NOT EXISTS schedule_id uuid;
 ALTER TABLE batches ADD COLUMN IF NOT EXISTS submitted_at timestamptz;   -- for the stuck-batch alert
+-- the payment record: who asked, and what happened to a link after it was sent
+ALTER TABLE batches ADD COLUMN IF NOT EXISTS requested_by text;           -- did of the operator who sent it for approval
+ALTER TABLE payout_rows ADD COLUMN IF NOT EXISTS claimed_to text;         -- recipient in the Claimed event
+ALTER TABLE payout_rows ADD COLUMN IF NOT EXISTS refunded_at timestamptz;
+ALTER TABLE payout_rows ADD COLUMN IF NOT EXISTS refund_by_expiry boolean; -- Refunded(byExpiry)
+ALTER TABLE payout_rows ADD COLUMN IF NOT EXISTS settle_tx text;          -- the claim or refund transaction

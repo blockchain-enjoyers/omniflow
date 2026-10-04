@@ -39,6 +39,8 @@ export interface ComposeConfig {
   corsOrigins?: string[] | "any";
   trustProxy?: boolean | number | string;
   monitor?: MonitorConfig;
+  /** for payment records: the network's name (a demo backend names its demo network) and an EIP-3091 explorer */
+  network?: { name?: string; explorerUrl?: string };
   /** partner not chosen — the emulator, or nothing */
   onramp?: { emulatorUrl: string } | OnrampProvider;
 }
@@ -68,7 +70,7 @@ export async function compose(cfg: ComposeConfig) {
   const forms = new FormService(db, mailer, cfg.urls.form);
   const lists = new ListService(db, payouts, mailer, cfg.urls.app, cfg.tokenDecimals ?? 6);
   payouts.afterSettle = (payoutId) => lists.rememberPaid(payoutId);
-  const reports = new ReportService(db, new StablecoinParity(), cfg.tokenDecimals ?? 6);
+  const reports = new ReportService(db, new StablecoinParity(), cfg.tokenDecimals ?? 6, "USDC", cfg.network);
   const onramp = !cfg.onramp ? null : "emulatorUrl" in cfg.onramp ? new EmulatedOnramp(cfg.onramp.emulatorUrl) : cfg.onramp;
   const monitor = new Monitor(db, chain, cfg.monitor);
   /** One scheduler pass: indexer, keeper, stuck batches, recurring payouts, then the health alerts. Idempotent. */

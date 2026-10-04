@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { formatUnits } from "viem";
-import { MODE } from "./mode";
+import { explorerLink, MODE } from "./mode";
 
 export const usdc = (units: string | bigint) => `${Number(formatUnits(BigInt(units), 6)).toLocaleString("en-US", { maximumFractionDigits: 6 })} USDC`;
 const CHAINS: Record<number, string> = { 42161: "Arbitrum One", 421614: "Arbitrum Sepolia (testnet)", 31337: "local chain (anvil)" };
@@ -80,9 +80,15 @@ export const Badge = ({ s, testid, extra }: { s: string; testid?: string; extra?
 export function Addr({ value, full, testid }: { value?: string | null; full?: boolean; testid?: string }) {
   const [copied, setCopied] = useState(false);
   if (!value) return <span className="muted">—</span>;
+  // a transaction hash or an address opens the block explorer when one is configured (real mode)
+  const link = /^0x[0-9a-fA-F]{64}$/.test(value) ? explorerLink("tx", value) : /^0x[0-9a-fA-F]{40}$/.test(value) ? explorerLink("address", value) : null;
   return (
     <span className="addr" title={value}>
-      <span className="v" data-testid={testid}>{full ? value : short(value)}</span>
+      {link ? (
+        <a className="v" data-testid={testid} href={link} target="_blank" rel="noreferrer">{full ? value : short(value)}</a>
+      ) : (
+        <span className="v" data-testid={testid}>{full ? value : short(value)}</span>
+      )}
       <button
         type="button"
         aria-label="Copy"

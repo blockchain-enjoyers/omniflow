@@ -146,6 +146,8 @@ export async function startStack(o: StackOptions): Promise<RunningStack> {
       paymaster: zerodevUrl ? { zerodev: { url: zerodevUrl } } : { local: { address: chain.paymaster, signerKey: PAYMASTER_SIGNER_KEY } },
       onramp: { emulatorUrl: onrampUrl },
       devEndpoints: true,
+      // no explorer: a demo chain's transactions exist nowhere else
+      network: { name: "Demo network (test money)" },
     });
     await api.app.listen(p.api);
     const apiUrl = `http://${host}:${(api.app.getHttpServer().address() as AddressInfo).port}`;

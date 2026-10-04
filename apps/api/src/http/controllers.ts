@@ -205,7 +205,7 @@ export class PayoutController {
   @Post("batches")
   async freeze(@Req() r: Rq, @Param("id") id: string) {
     const org = await this.can(r, id, ["operator"]);
-    const b = await this.s.freezeBatch(id);
+    const b = await this.s.freezeBatch(id, r.user.did);
     await this.orgs.audit(org, r.user.did, "batch.frozen", { payoutId: id, batchId: b.id });
     await this.s.notifyApprovers(b.id, "pending");
     return json(b);
@@ -214,7 +214,7 @@ export class PayoutController {
   @Post("revoke")
   async revoke(@Req() r: Rq, @Param("id") id: string, @Body() b: { rows: string[] }) {
     const org = await this.can(r, id, ["operator"]);
-    const batch = await this.s.freezeRevoke(id, b.rows);
+    const batch = await this.s.freezeRevoke(id, b.rows, r.user.did);
     await this.orgs.audit(org, r.user.did, "batch.revoke_frozen", { payoutId: id, rows: b.rows });
     await this.s.notifyApprovers(batch.id, "pending");
     return json(batch);

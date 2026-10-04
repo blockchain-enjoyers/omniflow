@@ -1,5 +1,6 @@
 import { formatUnits, type Address } from "viem";
 import type { Db } from "../db/db.js";
+import { RecordService, type NetworkInfo } from "./record.js";
 
 /** USD value at the time of the operation. Where the number comes from is always part of the report. */
 export interface PriceSource {
@@ -35,7 +36,11 @@ export interface ReportLine {
 const STATUS_LABEL: Record<string, string> = { sent: "sent", in_escrow: "claim link sent, not yet claimed", claimed: "claimed via link", refunded: "returned to sender" };
 
 export class ReportService {
-  constructor(private readonly db: Db, private readonly price: PriceSource, private readonly decimals: number, private readonly tokenSymbol = "USDC") {}
+  /** one page per payment (record.ts) */
+  readonly records: RecordService;
+  constructor(private readonly db: Db, private readonly price: PriceSource, private readonly decimals: number, private readonly tokenSymbol = "USDC", network: NetworkInfo = {}) {
+    this.records = new RecordService(db, price, decimals, network, tokenSymbol);
+  }
 
   /** Every row that left the account in the period: direct transfers and escrow deposits (claimed or not). */
   async payments(orgId: string, from?: Date, to?: Date): Promise<ReportLine[]> {

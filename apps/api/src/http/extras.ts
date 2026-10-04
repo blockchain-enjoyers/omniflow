@@ -89,6 +89,16 @@ export class OrgExtrasController {
     return ReportService.toCsv(lines);
   }
 
+  /** Payment records for the period: one page per payment, to print or save as PDF. */
+  @Get("reports/records")
+  async records(@Req() r: Rq, @Param("id") id: string, @Query("from") from: string | undefined, @Query("to") to: string | undefined, @Res({ passthrough: true }) res: { setHeader(k: string, v: string): void }) {
+    await this.orgs.requireRole(id, r.user, ANY);
+    const recs = await this.reports.records.records(id, { from: from ? new Date(from) : undefined, to: to ? new Date(to) : undefined });
+    res.setHeader("content-type", "text/html; charset=utf-8");
+    res.setHeader("content-disposition", `attachment; filename="omniflow-payment-records.html"`);
+    return this.reports.records.html(recs, "Payment records");
+  }
+
   /** buy crypto onto the organisation's own account. The destination comes from the database. */
   @Post("onramp")
   async buy(@Req() r: Rq, @Param("id") id: string, @Body() b: { fiatAmount: number; currency?: string; returnUrl?: string }) {
@@ -105,7 +115,25 @@ export class OrgExtrasController {
 @UseFilters(ErrorFilter)
 @UseGuards(AuthGuard)
 export class PayoutExtrasController {
-  constructor(@Inject(ORGS) private readonly orgs: OrgService, @Inject(LISTS) private readonly lists: ListService, @Inject(PAYOUTS) private readonly payouts: PayoutService) {}
+  constructor(
+    @Inject(ORGS) private readonly orgs: OrgService,
+    @Inject(LISTS) private readonly lists: ListService,
+    @Inject(PAYOUTS) private readonly payouts: PayoutService,
+    @Inject(REPORTS) private readonly reports: ReportService,
+  ) {}
+
+  /** The record of one payment (one row): a page to keep, print or save as PDF. */
+  @Get("rows/:row/record")
+  async record(@Req() r: Rq, @Param("id") id: string, @Param("row") row: string, @Res({ passthrough: true }) res: { setHeader(k: string, v: string): void }) {
+    const org = await this.orgs.orgOfPayout(id);
+    await this.orgs.requireRole(org, r.user, ANY);
+    const [rec] = await this.reports.records.records(org, { payoutId: id, row });
+    if (!rec) throw new HttpError(404, "no payment for this row yet — a record exists once the money has left the account");
+    const name = `${rec.payout}-${rec.recipient}`.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60) || "payment";
+    res.setHeader("content-type", "text/html; charset=utf-8");
+    res.setHeader("content-disposition", `attachment; filename="omniflow-record-${name}.html"`);
+    return this.reports.records.html([rec], `Payment record — ${rec.recipient}`);
+  }
 
   private async op(r: Rq, id: string) {
     const org = await this.orgs.orgOfPayout(id);
@@ -141,7 +169,7 @@ export class PayoutExtrasController {
   @Post("rekey")
   async rekey(@Req() r: Rq, @Param("id") id: string, @Body() b: { rows: string[] }) {
     const org = await this.op(r, id);
-    const batch = await this.payouts.freezeRekey(id, b.rows);
+    const batch = await this.payouts.freezeRekey(id, b.rows, r.user.did);
     await this.orgs.audit(org, r.user.did, "batch.rekey_frozen", { payoutId: id, rows: b.rows });
     await this.payouts.notifyApprovers(batch.id, "pending");
     return json(batch);

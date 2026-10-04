@@ -29,6 +29,8 @@ const { app, tick, db } = await compose({
     ? { emulatorUrl: process.env.PRIVY_EMULATOR_URL }
     : { verificationKeyPem: need("PRIVY_VERIFICATION_KEY"), appId: need("PRIVY_APP_ID") },
   claimKeyEncryptionKey: need("CLAIM_KEY_ENCRYPTION_KEY"),
+  // payment records link transactions here (EIP-3091 routes); e.g. https://sepolia.arbiscan.io for Arbitrum Sepolia
+  network: { name: process.env.NETWORK_NAME || undefined, explorerUrl: process.env.EXPLORER_URL || undefined },
   urls: { app: need("APP_URL"), claim: need("CLAIM_BASE_URL"), form: need("FORM_BASE_URL") },
   tokenDecimals: Number(process.env.TOKEN_DECIMALS ?? 6),
   claimTip: BigInt(process.env.CLAIM_TIP_UNITS ?? "50000"),

@@ -3,6 +3,8 @@ interface ImportMetaEnv {
   /** real mode */
   readonly VITE_API_URL?: string;
   readonly VITE_PRIVY_APP_ID?: string;
+  /** real mode: block explorer for transaction and address links, e.g. https://sepolia.arbiscan.io */
+  readonly VITE_EXPLORER_URL?: string;
   /** demo mode */
   readonly VITE_DEMO_API_URL?: string;
   readonly VITE_DEMO_AUTH_URL?: string;

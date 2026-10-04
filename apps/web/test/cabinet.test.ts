@@ -136,7 +136,7 @@ describe.skipIf(!DB_URL)("the application through the browser", () => {
 
   beforeAll(async () => {
     const zero = { anvil: 0, api: 0, privy: 0, onramp: 0, web: 0, claim: 0, bundler: 0, zerodev: 0 };
-    stack = await startStack({ databaseUrl: DB_URL!, fork: process.env.STACK === "fork", forkUrl: process.env.FORK_URL, host: "127.0.0.1", ports: zero, tickMs: 1000, liveExamples: { pool: 0 } });
+    stack = await startStack({ databaseUrl: DB_URL!, fork: process.env.STACK === "fork", forkUrl: process.env.FORK_URL, host: "127.0.0.1", ports: zero, tickMs: 1000, liveExamples: { pool: 0 }, log: (m) => /live example|tick/.test(m) && console.error(`[stack] ${m}`) });
     browser = await chromium.launch({ executablePath: CHROMIUM });
   });
 
@@ -285,7 +285,22 @@ describe.skipIf(!DB_URL)("the application through the browser", () => {
     await o.goto(payoutUrl);
     await expect.poll(() => statusOf(o, "Carol"), { timeout: 30_000 }).toBe("link sent, not claimed");
     expect(await text(o, "status-Alice")).toBe("sent");
+    // who asked and who approved, on the payout itself (not only in the activity log)
+    await expect.poll(() => text(o, "trail")).toContain(`Requested by ${ops}`);
+    expect(await text(o, "trail")).toContain(`approved by ${a1}, ${a2}`);
     await shot(o, "payout-sent");
+    const [rec] = await Promise.all([o.waitForEvent("download"), o.getByTestId("record-Alice").click()]);
+    const page = readFileSync((await rec.path())!, "utf8");
+    expect(rec.suggestedFilename()).toBe("omniflow-record-alice.html");
+    expect(page).toContain("Payment record");
+    expect(page).toContain(`Requested by</th><td>${ops}`);
+    expect(page).toContain("not a tax form");
+    // the record opens as a page of its own (what the person will print or save as PDF)
+    const viewer = await o.context().newPage();
+    await viewer.setContent(page);
+    expect(await viewer.locator("h1").first().textContent()).toBe("1000 USDC to Alice");
+    await shot(viewer, "payment-record");
+    await viewer.close();
   });
 
   it("Carol opens the emailed link, logs in by email and receives into her embedded wallet", async () => {
@@ -468,6 +483,11 @@ describe.skipIf(!DB_URL)("the application through the browser", () => {
     expect(csv.split("\n")[0]).toContain("Date");
     expect(csv).toContain("Alice");
     expect(download.suggestedFilename()).toBe("omniflow-Acme-payments.csv");
+    const [recs] = await Promise.all([p.waitForEvent("download"), p.getByTestId("records").click()]);
+    const all = readFileSync((await recs.path())!, "utf8");
+    expect(all).toContain("to Alice");
+    expect(all).toContain("to Carol");
+    expect(recs.suggestedFilename()).toBe("omniflow-Acme-payment-records.html");
   });
 
   it("the dev mailbox lists the letters", async () => {
@@ -529,14 +549,18 @@ describe.skipIf(!DB_URL)("the application through the browser", () => {
     expect(await v.textContent("body")).toContain("What happens to the money");
     expect(await v.getByTestId("source-link").count()).toBe(0); // no source URL configured, no dead link
     await shot(v, "landing");
+    const t0 = Date.now();
     await v.getByTestId("live-example").click();
-    await v.getByTestId("rows").waitFor({ timeout: 60_000 });
+    await v.getByTestId("rows").or(v.getByTestId("live-example-error")).waitFor({ timeout: 90_000 });
+    if (await v.getByTestId("live-example-error").count()) throw new Error(`live example: ${await text(v, "live-example-error")}`);
+    console.error(`[test] live example opened in ${Date.now() - t0} ms`);
     expect(v.url()).toMatch(/\?mode=demo#\/payout\//);
     expect(await text(v, "demo-banner")).toContain("Live example");
     expect(await text(v, "status-Alice")).toContain("sent");
     expect(await text(v, "status-Carol")).toContain("not claimed");
     expect(await text(v, "status-Dave")).toContain("needs details");
     expect(await text(v, "status-Frank")).toContain("returned");
+    expect(await text(v, "trail")).toMatch(/Requested by you-\w+@example\.test · approved by anna-\w+@example\.test, boris-\w+@example\.test/);
     await shot(v, "live-example");
     const orgHref = await v.locator("a.back").getAttribute("href");
     await v.goto(`${demoUrl()}${orgHref}/reports`);

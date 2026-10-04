@@ -1,11 +1,19 @@
 import { useCallback, useState } from "react";
 import { useAuth } from "@omniflow/auth-client";
-import { call, type Batch, type Org, type Receipt, type Review, type ReviewRow } from "../api";
-import { Addr, Badge, Callout, confirmAction, Err, Section, short, Table, toast, usdc, useAction, useLoad, usePoll } from "../ui";
+import { call, download, type Batch, type Org, type Receipt, type Review, type ReviewRow } from "../api";
+import { Addr, Badge, Callout, confirmAction, dateTime, Err, Section, short, Table, toast, usdc, useAction, useLoad, usePoll } from "../ui";
 
 const who = (r: ReviewRow) => `${r.name}${r.address ? ` · ${short(r.address)}` : ""}${r.email ? ` · ${r.email}` : ""}`;
 const REASON: Record<string, string> = { "no-address-no-email": "no address and no email — waiting for details", "other-chain": "other chain — will not be sent" };
 const BATCH_KIND: Record<string, string> = { pay: "payout", revoke: "revoke", rekey: "new links" };
+const RECORDED = ["sent", "in_escrow", "claimed", "refunded"];
+
+/** Who asked for a batch and who approved it, in the order they signed. */
+function trail(b: Batch) {
+  const approved = b.signers.filter((x) => x.signed).sort((x, y) => (x.signedAt ?? "").localeCompare(y.signedAt ?? "")).map((x) => x.email ?? short(x.address));
+  const last = b.signers.map((x) => x.signedAt).filter(Boolean).sort().pop();
+  return { requested: b.requested_by ?? "not recorded", approved, last };
+}
 
 export function PayoutPage({ id }: { id: string }) {
   const auth = useAuth();
@@ -63,9 +71,22 @@ export function PayoutPage({ id }: { id: string }) {
       <span className="num">{usdc(r.amount)}</span>,
       <Badge s={r.status} testid={`status-${r.name}`} extra={r.failReason ? ` (${r.failReason})` : ""} />,
       <Addr value={r.txHash} />,
-      editable(r.status) && !closed && !e ? <button className="ghost sm" data-testid={`edit-${r.name}`} onClick={() => setEdit({ ...edit, [r.row]: { amount: String(Number(r.amount) / 1e6), address: r.address ?? "", email: r.email ?? "" } })}>Edit</button> : null,
+      editable(r.status) && !closed && !e ? (
+        <button className="ghost sm" data-testid={`edit-${r.name}`} onClick={() => setEdit({ ...edit, [r.row]: { amount: String(Number(r.amount) / 1e6), address: r.address ?? "", email: r.email ?? "" } })}>Edit</button>
+      ) : RECORDED.includes(r.status) ? (
+        <button
+          className="ghost sm"
+          data-testid={`record-${r.name}`}
+          title="A page with who paid whom, who approved it and the transaction — to keep, print or save as PDF"
+          onClick={a.run(() => download(auth.headers, `/payouts/${id}/rows/${r.row}/record`, `omniflow-record-${r.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}.html`, "text/html"))}
+        >
+          Download record
+        </button>
+      ) : null,
     ];
   };
+  const payBatches = (batches.data ?? []).filter((b) => b.kind === "pay");
+  const lastPay = payBatches[payBatches.length - 1];
   const orgId = receipt.data?.payout.orgId;
   const org = useLoad(() => (orgId ? call<Org>(auth.headers, "GET", `/orgs/${orgId}`) : Promise.resolve(null)), [orgId]);
   const selectable = rows.some((r) => r.status === "in_escrow");
@@ -77,6 +98,14 @@ export function PayoutPage({ id }: { id: string }) {
         <div>
           <h1 data-testid="payout-title">{receipt.data?.payout.title ?? "…"}</h1>
           <div className="sub row">{receipt.data && <span data-testid="payout-status"><Badge s={receipt.data.payout.status} /></span>}<span>{rows.length} rows · {usdc(rows.reduce((x, r) => x + BigInt(r.amount), 0n))}</span></div>
+          {lastPay && (
+            <p className="trail" data-testid="trail">
+              Requested by <b>{trail(lastPay).requested}</b>
+              {trail(lastPay).approved.length > 0 && <> · approved by <b>{trail(lastPay).approved.join(", ")}</b></>}
+              {trail(lastPay).last && <> · {dateTime(trail(lastPay).last!)}</>}
+              {payBatches.length > 1 && <span className="muted"> · latest of {payBatches.length} batches</span>}
+            </p>
+          )}
         </div>
         <div className="row">
           <button className="secondary" data-testid="repeat" onClick={a.run(async () => { const p = await call<{ id: string }>(auth.headers, "POST", `/payouts/${id}/repeat`, {}); window.location.hash = `#/payout/${p.id}`; })}>Repeat with edits</button>
@@ -202,7 +231,19 @@ export function PayoutPage({ id }: { id: string }) {
         <Section flush title="Batches" desc="Each batch is approved by the threshold separately." testid="batches">
           <Table
             cols={[{ label: "#" }, { label: "What", primary: true }, { label: "Status" }, { label: "Transaction" }]}
-            rows={(batches.data ?? []).map((b) => ({ key: b.id, cells: [b.batch_no + 1, BATCH_KIND[b.kind] ?? b.kind, <a href={`#/approve/${b.id}`} data-testid={`batch-${b.batch_no}`}><Badge s={b.status} /></a>, <Addr value={b.tx_hash} />] }))}
+            rows={(batches.data ?? []).map((b) => ({
+              key: b.id,
+              cells: [
+                b.batch_no + 1,
+                <span className="batch-trail" data-testid={`batch-trail-${b.batch_no}`}>
+                  {BATCH_KIND[b.kind] ?? b.kind}
+                  <span className="cell-sub small muted">requested by {trail(b).requested}</span>
+                  <span className="cell-sub small muted">{trail(b).approved.length ? `approved by ${trail(b).approved.join(", ")}` : "no signatures yet"}</span>
+                </span>,
+                <a href={`#/approve/${b.id}`} data-testid={`batch-${b.batch_no}`}><Badge s={b.status} /></a>,
+                <Addr value={b.tx_hash} />,
+              ],
+            }))}
             empty="Not sent yet."
           />
         </Section>

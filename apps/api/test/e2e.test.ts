@@ -237,6 +237,9 @@ describe.skipIf(!DB_URL)("sender side e2e (emulated Privy)", () => {
     expect(await balance(bob)).toBe(2_000_500_000n);
     expect(await balance(account)).toBe(before - 6_000_500_000n - 50_000n);
     expect((await inbox(a3.email))[0]!.subject).toMatch(/left the account/);
+    // /final starts a settle and approveAndSubmit runs another at the same time: the batch is applied once
+    await new Promise((ok) => setTimeout(ok, 1500));
+    expect((await inbox(a3.email)).filter((m) => /left the account/.test(m.subject))).toHaveLength(1);
     const bal = await api.get(`/orgs/${orgId}/balance`).set(ops.headers).expect(200);
     expect(bal.body.reservedInEscrow).toBe("3000000000"); // still the sender's money
   });
@@ -413,6 +416,40 @@ describe.skipIf(!DB_URL)("sender side e2e (emulated Privy)", () => {
     expect(csv.headers["content-type"]).toMatch(/text\/csv/);
     expect(csv.text.split("\n")[0]).toContain("USD value");
     await api.get(`/orgs/${orgId}/reports/payments`).set(outsider.headers).expect(403);
+  });
+
+  it("payment record: one page per payment — who paid whom, who asked, who approved, what reached the recipient", async () => {
+    const rc = (await api.get(`/payouts/${payoutId}/receipt`).set(ops.headers).expect(200)).body as { rows: { row: string; name: string }[] };
+    const rowOf = (name: string) => rc.rows.find((r) => r.name === name)!.row;
+    const res = await api.get(`/payouts/${payoutId}/rows/${rowOf("Alice")}/record`).set(a3.headers).expect(200);
+    expect(res.headers["content-type"]).toMatch(/text\/html/);
+    expect(res.headers["content-disposition"]).toMatch(/attachment; filename="omniflow-record-september-grants-alice\.html"/);
+    const alice = res.text;
+    expect(alice).toContain("Payment record");
+    expect(alice).toContain("1000 USDC to Alice");
+    expect(alice).toMatch(/1000\.00 USD .*at par.*not a market quote/);
+    expect(alice).toContain(`Requested by</th><td>${ops.email}`);
+    expect(alice).toContain(a1.email);
+    expect(alice).toContain(a2.email);
+    expect(alice).toContain("2 of 3 approvals required");
+    expect(alice).toContain("Paid directly to the recipient");
+    expect(alice).toContain("not a tax form");
+    expect(alice).not.toContain("<a href"); // no explorer configured here: hashes stay text
+    const carol = (await api.get(`/payouts/${payoutId}/rows/${rowOf("Carol")}/record`).set(ops.headers).expect(200)).text;
+    expect(carol).toMatch(/claim link was emailed to carol@/i);
+    expect(carol).toMatch(/Claimed on .* to the wallet 0x[0-9a-fA-F]{40}/);
+    expect(carol).toContain("Claim transaction");
+    // the organisation's records for the period: every outcome reads in words
+    const all = (await api.get(`/orgs/${orgId}/reports/records`).set(ops.headers).expect(200)).text;
+    expect(all.match(/<section class="rec">/g)!.length).toBeGreaterThan(4);
+    expect(all).toContain("the link expired unclaimed");
+    expect(all).toContain("the organization revoked it");
+    await api.get(`/orgs/${orgId}/reports/records`).set(outsider.headers).expect(403);
+    await api.get(`/payouts/${payoutId}/rows/${rowOf("Alice")}/record`).set(outsider.headers).expect(403);
+    // a row that has not left the account has no record yet
+    const draft = await api.post(`/orgs/${orgId}/payouts`).set(ops.headers).send({ title: "not yet", rows: [{ name: "Nobody", amount: "1" }] }).expect(201);
+    const dr = (await api.get(`/payouts/${draft.body.id}/receipt`).set(ops.headers).expect(200)).body.rows[0].row;
+    await api.get(`/payouts/${draft.body.id}/rows/${dr}/record`).set(ops.headers).expect(404);
   });
 
   it("CSV export neutralises formulas in names from uploaded files", async () => {

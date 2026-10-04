@@ -11,7 +11,7 @@ export type Mode = "demo" | "real";
 const env = import.meta.env;
 export const CONFIG = {
   demo: { api: env.VITE_DEMO_API_URL || "", authUrl: env.VITE_DEMO_AUTH_URL || "", exampleUrl: env.VITE_DEMO_EXAMPLE_URL || "" },
-  real: { api: env.VITE_API_URL || "", privyAppId: env.VITE_PRIVY_APP_ID || "" },
+  real: { api: env.VITE_API_URL || "", privyAppId: env.VITE_PRIVY_APP_ID || "", explorerUrl: env.VITE_EXPLORER_URL || "" },
 };
 export const AVAILABLE: Record<Mode, boolean> = {
   demo: Boolean(CONFIG.demo.api && CONFIG.demo.authUrl),
@@ -89,3 +89,12 @@ export async function openLiveExample() {
 }
 
 export const EXAMPLE_AVAILABLE = AVAILABLE.demo && Boolean(CONFIG.demo.exampleUrl);
+
+/**
+ * A block explorer link (EIP-3091 routes), real mode only: a demo chain's transactions exist on no explorer, and a
+ * fork shares the real chain's id — so the explorer is configured, never guessed from the chain id.
+ */
+export function explorerLink(kind: "tx" | "address", v: string): string | null {
+  const base = MODE === "real" ? CONFIG.real.explorerUrl : "";
+  return base ? `${base.replace(/\/$/, "")}/${kind}/${v}` : null;
+}

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import QRCode from "qrcode";
 import { useAuth } from "@omniflow/auth-client";
-import { call, type Org, type PayoutListItem } from "../api";
+import { call, download, type Org, type PayoutListItem } from "../api";
 import { Addr, Badge, Callout, chainName, confirmAction, date, dateTime, Err, Field, Section, Stat, Table, toast, usdc, useAction, useLoad } from "../ui";
 
 const TABS: [string, string][] = [
@@ -245,21 +245,19 @@ function Reports({ org }: { org: Org }) {
       desc={lines.data?.[0] ? `USD value: ${lines.data[0].priceSource}.` : "Date, recipient, amount, USD value, category, hash."}
       testid="reports"
       actions={
-        <button
-          className="secondary"
-          data-testid="csv"
-          onClick={a.run(async () => {
-            const text = await call<string>(auth.headers, "GET", `/orgs/${org.id}/reports/payments?${q}format=csv`);
-            const url = URL.createObjectURL(new Blob([text], { type: "text/csv" }));
-            const link = document.createElement("a");
-            link.href = url;
-            link.download = `omniflow-${org.name}-payments.csv`;
-            link.click();
-            URL.revokeObjectURL(url);
-          })}
-        >
-          Export CSV
-        </button>
+        <div className="row">
+          <button
+            className="secondary"
+            data-testid="records"
+            title="One page per payment: who paid whom, who requested and approved it, the transaction — to keep, print or save as PDF"
+            onClick={a.run(() => download(auth.headers, `/orgs/${org.id}/reports/records?${q}`, `omniflow-${org.name}-payment-records.html`, "text/html"))}
+          >
+            Download records
+          </button>
+          <button className="secondary" data-testid="csv" onClick={a.run(() => download(auth.headers, `/orgs/${org.id}/reports/payments?${q}format=csv`, `omniflow-${org.name}-payments.csv`, "text/csv"))}>
+            Export CSV
+          </button>
+        </div>
       }
     >
       <div className="row" style={{ padding: "0 20px 16px" }}>

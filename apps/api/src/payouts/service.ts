@@ -178,7 +178,7 @@ export class PayoutService {
    * Freezes the next batch: up to maxRowsPerBatch ready rows become a manifest with fixed calldata and nonce.
    * One open batch per organisation — its nonce must not collide with another (double-send guard, layer 3).
    */
-  async freezeBatch(payoutId: string) {
+  async freezeBatch(payoutId: string, requestedBy?: string) {
     const p = await this.payout(payoutId);
     const org = await this.org(p.org_id);
     const open = await this.db.query(
@@ -212,11 +212,11 @@ export class PayoutService {
       };
     });
     const batchNo = Number((await this.db.query(`SELECT count(*) FROM batches WHERE payout_id = $1`, [payoutId])).rows[0].count);
-    return this.insertBatch(org, payoutId, batchNo, nonce, frozen, "pay", ready, keys, autoRefundAt);
+    return this.insertBatch(org, payoutId, batchNo, nonce, frozen, "pay", ready, keys, autoRefundAt, requestedBy);
   }
 
   /** revoking unclaimed escrow deposits is a batch of escrow.refund calls under the same N-of-M. */
-  async freezeRevoke(payoutId: string, rowKeys: string[]) {
+  async freezeRevoke(payoutId: string, rowKeys: string[], requestedBy?: string) {
     const p = await this.payout(payoutId);
     const org = await this.org(p.org_id);
     const rows = (await this.rows(payoutId)).filter((r) => rowKeys.includes(r.row_key) && r.status === "in_escrow");
@@ -224,14 +224,14 @@ export class PayoutService {
     const nonce = await this.chain.getNonce(org.account);
     const frozen: FrozenRow[] = rows.map((r) => ({ kind: "refund", rowId: r.row_key, depositId: r.deposit_id as Hex, amount: BigInt(r.amount) }));
     const batchNo = Number((await this.db.query(`SELECT count(*) FROM batches WHERE payout_id = $1`, [payoutId])).rows[0].count);
-    return this.insertBatch(org, payoutId, batchNo, nonce, frozen, "revoke", [], new Map(), 0);
+    return this.insertBatch(org, payoutId, batchNo, nonce, frozen, "revoke", [], new Map(), 0, requestedBy);
   }
 
   /**
    * a new claim link for unclaimed deposits (email in spam, link leaked). escrow.rekey under the same N-of-M;
    * the new key is emailed only after the rekey is on chain — until then the old link keeps working.
    */
-  async freezeRekey(payoutId: string, rowKeys: string[]) {
+  async freezeRekey(payoutId: string, rowKeys: string[], requestedBy?: string) {
     const p = await this.payout(payoutId);
     const org = await this.org(p.org_id);
     const rows = (await this.rows(payoutId)).filter((r) => rowKeys.includes(r.row_key) && r.status === "in_escrow" && r.email);
@@ -240,7 +240,7 @@ export class PayoutService {
     const keys = rows.map((r) => ({ r, k: generateClaimKey() }));
     const frozen: FrozenRow[] = keys.map(({ r, k }) => ({ kind: "rekey", rowId: r.row_key, depositId: r.deposit_id as Hex, newClaimSigner: k.address, amount: 0n }));
     const batchNo = Number((await this.db.query(`SELECT count(*) FROM batches WHERE payout_id = $1`, [payoutId])).rows[0].count);
-    const b = await this.insertBatch(org, payoutId, batchNo, nonce, frozen, "rekey", [], new Map(), 0);
+    const b = await this.insertBatch(org, payoutId, batchNo, nonce, frozen, "rekey", [], new Map(), 0, requestedBy);
     for (const { r, k } of keys) {
       const sealed = this.vault.seal(k.privateKey);
       await this.db.query(
@@ -262,6 +262,7 @@ export class PayoutService {
     rowsToLock: DbRow[],
     keys: Map<string, Hex>,
     autoRefundAt: number,
+    requestedBy?: string,
   ) {
     const manifest: BatchManifest = {
       version: 1,
@@ -278,9 +279,9 @@ export class PayoutService {
     const hash = callDataAndNonceHash(org.account, callData, nonce);
     return tx(this.db, async (c) => {
       const b = await c.query(
-        `INSERT INTO batches (payout_id, batch_no, kind, nonce, manifest, call_data, approve_hash, status)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,'collecting') RETURNING id`,
-        [payoutId, batchNo, kind, nonce.toString(), manifestToJson(manifest), callData, hash],
+        `INSERT INTO batches (payout_id, batch_no, kind, nonce, manifest, call_data, approve_hash, status, requested_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,'collecting',$8) RETURNING id`,
+        [payoutId, batchNo, kind, nonce.toString(), manifestToJson(manifest), callData, hash, requestedBy ?? null],
       );
       const batchId = b.rows[0].id as string;
       for (const r of rowsToLock) {
@@ -383,16 +384,33 @@ export class PayoutService {
   // --------------------------------------------------------------- indexer
 
   /** Applies the result of a submitted batch: row statuses, then claim emails for new escrow rows. */
-  async settleBatch(batchId: string) {
+  /** Callers in this process that settle the same batch wait for one and the same pass. */
+  private readonly settling = new Map<string, Promise<void>>();
+  settleBatch(batchId: string): Promise<void> {
+    let p = this.settling.get(batchId);
+    if (!p) {
+      p = this.settleOnce(batchId).finally(() => this.settling.delete(batchId));
+      this.settling.set(batchId, p);
+    }
+    return p;
+  }
+
+  private async settleOnce(batchId: string) {
     const { batch, org } = await this.batchCtx(batchId);
     if (batch.status !== "submitted") return;
     const r = await this.chain.waitOp({ userOpHash: batch.user_op_hash as Hex, txHash: batch.tx_hash as Hex | null }, org.account);
     const m = manifestFromJson(batch.manifest);
     const idx = executionIndexToRow(m);
     const failedRows = new Set(r.failedExecutions.map((i) => idx[i]));
+    // Two callers can settle the same batch (right after the last signature, and the scheduler's stuck-batch pass).
+    // Only the one that moves the batch out of 'submitted' applies it: a late second pass must not write row statuses
+    // over what happened since (a claim, a refund), nor send the emails twice.
+    let applied = false;
     await tx(this.db, async (c) => {
+      const own = await c.query(`UPDATE batches SET status=$2, tx_hash=$3 WHERE id=$1 AND status='submitted'`, [batchId, r.success ? "mined" : "failed", r.txHash]);
+      if (!own.rowCount) return;
+      applied = true;
       if (!r.success) {
-        await c.query(`UPDATE batches SET status='failed', tx_hash=$2 WHERE id=$1`, [batchId, r.txHash]);
         if (batch.kind === "pay") await c.query(`UPDATE payout_rows SET status='ready', batch_id=NULL WHERE batch_id=$1`, [batchId]);
         if (batch.kind === "rekey") {
           for (const fr of m.rows) await c.query(`UPDATE payout_rows SET rekey_pending=false WHERE payout_id=$1 AND row_key=$2`, [m.payoutId, fr.rowId]);
@@ -400,7 +418,6 @@ export class PayoutService {
         }
         return;
       }
-      await c.query(`UPDATE batches SET status='mined', tx_hash=$2 WHERE id=$1`, [batchId, r.txHash]);
       for (const fr of m.rows) {
         if (fr.kind === "refund") continue; // applied from the Refunded event
         const failed = failedRows.has(fr.rowId);
@@ -418,12 +435,14 @@ export class PayoutService {
           await c.query(`DELETE FROM claim_keys k USING payout_rows r WHERE k.row_id=r.id AND r.payout_id=$1 AND r.row_key=$2`, [m.payoutId, fr.rowId]);
         }
         await c.query(
-          `UPDATE payout_rows SET status=$3, fail_reason=$4, tx_hash=$5, executed_at=$6 WHERE payout_id=$1 AND row_key=$2`,
+          // a claim indexed before this write already moved the row on: keep that status
+          `UPDATE payout_rows SET status=CASE WHEN status='in_batch' THEN $3 ELSE status END, fail_reason=$4, tx_hash=$5, executed_at=$6 WHERE payout_id=$1 AND row_key=$2`,
           [m.payoutId, fr.rowId, failed ? "failed" : fr.kind === "transfer" ? "sent" : "in_escrow", failed ? "execution reverted in batch" : null, r.txHash, failed ? null : r.blockTime],
         );
       }
       await this.refreshPayoutStatus(c, m.payoutId);
     });
+    if (!applied) return;
     await this.applyEscrowEvents(org, r.blockNumber, r.blockNumber);
     await this.sendClaimEmails(m.payoutId);
     if (r.success) {
@@ -461,10 +480,10 @@ export class PayoutService {
         if (!ins.rowCount) return;
         const status: RowStatus = ev.eventName === "Claimed" ? "claimed" : "refunded";
         const at = new Date(Number((await this.chain.pub.getBlock({ blockNumber: log.blockNumber! })).timestamp) * 1000);
-        const upd = await c.query(
-          `UPDATE payout_rows SET status=$2, claimed_at=CASE WHEN $2='claimed' THEN $3::timestamptz ELSE claimed_at END WHERE deposit_id=$1 RETURNING payout_id`,
-          [ev.args.id, status, at],
-        );
+        const upd =
+          ev.eventName === "Claimed"
+            ? await c.query(`UPDATE payout_rows SET status=$2, claimed_at=$3, claimed_to=$4, settle_tx=$5 WHERE deposit_id=$1 RETURNING payout_id`, [ev.args.id, status, at, ev.args.recipient, log.transactionHash])
+            : await c.query(`UPDATE payout_rows SET status=$2, refunded_at=$3, refund_by_expiry=$4, settle_tx=$5 WHERE deposit_id=$1 RETURNING payout_id`, [ev.args.id, status, at, ev.args.byExpiry, log.transactionHash]);
         for (const u of upd.rows) await this.refreshPayoutStatus(c, u.payout_id);
       });
     }
@@ -676,7 +695,13 @@ Review and approve: ${this.cfg.appUrl}#/approve/${batchId}`,
 
   /** Batches with who has signed each: the operator sees whom the payout is waiting for. */
   async batchesOf(payoutId: string) {
-    const batches = (await this.db.query(`SELECT id, batch_no, kind, status, approve_hash, tx_hash, created_at FROM batches WHERE payout_id=$1 ORDER BY batch_no`, [payoutId])).rows;
+    const batches = (
+      await this.db.query(
+        `SELECT b.id, b.batch_no, b.kind, b.status, b.approve_hash, b.tx_hash, b.created_at, (SELECT u.email FROM users u WHERE u.did=b.requested_by) AS requested_by
+           FROM batches b WHERE b.payout_id=$1 ORDER BY b.batch_no`,
+        [payoutId],
+      )
+    ).rows;
     if (!batches.length) return batches;
     const orgId = (await this.db.query(`SELECT org_id FROM payouts WHERE id=$1`, [payoutId])).rows[0].org_id;
     const threshold = Number((await this.db.query(`SELECT threshold FROM orgs WHERE id=$1`, [orgId])).rows[0].threshold);
@@ -686,10 +711,10 @@ Review and approve: ${this.cfg.appUrl}#/approve/${batchId}`,
         [orgId],
       )
     ).rows as { address: Address; weight: number; email: string | null }[];
-    const signed = (await this.db.query(`SELECT batch_id, approver FROM approvals WHERE batch_id = ANY($1)`, [batches.map((b) => b.id)])).rows as { batch_id: string; approver: string }[];
+    const signed = (await this.db.query(`SELECT batch_id, approver, created_at FROM approvals WHERE batch_id = ANY($1)`, [batches.map((b) => b.id)])).rows as { batch_id: string; approver: string; created_at: Date }[];
     return batches.map((b) => {
-      const mine = new Set(signed.filter((s) => s.batch_id === b.id).map((s) => s.approver.toLowerCase()));
-      const signers = approvers.map((a) => ({ ...a, signed: mine.has(a.address.toLowerCase()) }));
+      const mine = new Map(signed.filter((s) => s.batch_id === b.id).map((s) => [s.approver.toLowerCase(), s.created_at]));
+      const signers = approvers.map((a) => ({ ...a, signed: mine.has(a.address.toLowerCase()), signedAt: mine.get(a.address.toLowerCase()) ?? null }));
       return { ...b, threshold, signedWeight: signers.filter((s) => s.signed).reduce((x, s) => x + s.weight, 0), signers };
     });
   }

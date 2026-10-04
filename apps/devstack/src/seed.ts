@@ -31,7 +31,10 @@ export async function emulatedLogin(stack: RunningStack, email: string): Promise
     return j;
   };
   await post("/auth/email/start", { email });
-  const code = (await readDevMailbox(stack.db, email))[0]!.subject.match(/\d{6}/)![0];
+  // the newest letter with a sign-in code — other mail (an approval request) may have arrived after it
+  const letter = (await readDevMailbox(stack.db, email)).find((m) => /code/i.test(m.subject) && /\b\d{6}\b/.test(m.subject));
+  if (!letter) throw new Error(`no sign-in code for ${email}`);
+  const code = letter.subject.match(/\b\d{6}\b/)![0];
   const r = await post("/auth/email/verify", { email, code });
   return { email, did: r.user.did, wallet: r.user.wallet, headers: { authorization: `Bearer ${r.accessToken}`, "privy-id-token": r.identityToken } };
 }
