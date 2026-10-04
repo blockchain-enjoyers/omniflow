@@ -39,7 +39,9 @@ export interface StackOptions {
   tickMs?: number;
   log?: (s: string) => void;
   /** "Open a live example": per-visitor sandboxes (example.ts); `pool` = how many are kept ready in advance */
-  liveExamples?: { pool: number };
+  liveExamples?: { pool: number; deferStart?: boolean };
+  /** local chain only: unix time of the first block (the demo history starts months ago and catches up to today) */
+  chainStart?: number;
 }
 
 export interface RunningStack {
@@ -95,7 +97,7 @@ export async function startStack(o: StackOptions): Promise<RunningStack> {
   const children: { kill(): void }[] = [];
 
   log(o.fork ? "anvil: Arbitrum Sepolia fork, deploying escrow and paymaster…" : "anvil: local chain, deploying the stack from source…");
-  const chain = await startDevStack({ fork: o.fork, forkUrl: o.forkUrl, port: p.anvil || undefined, contractsDir: CONTRACTS });
+  const chain = await startDevStack({ fork: o.fork, forkUrl: o.forkUrl, port: p.anvil || undefined, contractsDir: CONTRACTS, startTime: o.fork ? undefined : o.chainStart });
   const db = await prepareDatabase(o.databaseUrl);
 
   try {
@@ -126,10 +128,11 @@ export async function startStack(o: StackOptions): Promise<RunningStack> {
     let zerodevUrl: string | null = null;
     if ((o.aa ?? "zerodev") === "zerodev") {
       log("Alto bundler and ZeroDev RPC emulator…");
-      const alto = await startAlto(chain.rpcUrl, chain.entryPoint, { port: p.bundler || undefined });
+      // the demo chain clock is not the wall clock (a past history, examples moving it forward): no wall-clock expiry checks
+      const alto = await startAlto(chain.rpcUrl, chain.entryPoint, { port: p.bundler || undefined, expirationCheck: false });
       children.push(alto.process);
       const zdApp = express();
-      zdApp.use(zerodevEmulator({ bundlerUrl: alto.url, rpcUrl: chain.rpcUrl, paymaster: chain.paymaster, paymasterSignerKey: PAYMASTER_SIGNER_KEY }));
+      zdApp.use(zerodevEmulator({ bundlerUrl: alto.url, rpcUrl: chain.rpcUrl, paymaster: chain.paymaster, paymasterSignerKey: PAYMASTER_SIGNER_KEY, sponsorshipTtlSec: 0 }));
       const zdSrv = await listen(zdApp, p.zerodev);
       servers.push(zdSrv);
       zerodevUrl = `http://${host}:${portOf(zdSrv)}`;
@@ -211,7 +214,8 @@ export async function startStack(o: StackOptions): Promise<RunningStack> {
     if (o.liveExamples) {
       examples = new LiveExamples(result, { pool: o.liveExamples.pool, log });
       result.examples = examples;
-      examples.start();
+      // a seeded history moves the chain clock; examples move it too, so they start after it
+      if (!o.liveExamples.deferStart) examples.start();
     }
     return result;
   } catch (e) {

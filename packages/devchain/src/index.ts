@@ -82,6 +82,8 @@ export interface DevStackOptions {
   fork?: boolean;
   forkUrl?: string;
   port?: number;
+  /** local chain only: unix time of the first block — a demo history can then happen "in the past" */
+  startTime?: number;
   contractsDir: string;
   foundryBin?: string;
   /** optional pre-made account (tests); the app creates its own accounts through flow 1 */
@@ -94,7 +96,7 @@ export async function startDevStack(o: DevStackOptions): Promise<DevStack> {
   const bin = o.foundryBin ?? process.env.FOUNDRY_BIN ?? "/root/.foundry/bin";
   const port = o.port ?? 8600 + Math.floor(Math.random() * 300);
   const rpcUrl = `http://127.0.0.1:${port}`;
-  const args = o.fork ? ["--fork-url", o.forkUrl ?? "https://sepolia-rollup.arbitrum.io/rpc"] : ["--disable-code-size-limit"];
+  const args = o.fork ? ["--fork-url", o.forkUrl ?? "https://sepolia-rollup.arbitrum.io/rpc"] : ["--disable-code-size-limit", ...(o.startTime ? ["--timestamp", String(o.startTime)] : [])];
   const anvil = spawn(`${bin}/anvil`, ["--port", String(port), "--silent", ...args], { stdio: "ignore" });
   let chainId = 0;
   for (let i = 0; i < 150 && !chainId; i++) {
@@ -139,11 +141,15 @@ export interface LocalBundler {
  * to enforce ERC-7562 through debug_traceCall; in 0.0.21 it fails for EntryPoint v0.7 before any rule is applied
  * (revert data `DelegateAndRevert` not in its ABI), so it is off by default.
  */
-export async function startAlto(rpcUrl: string, entryPoint: Address, o: { port?: number; safeMode?: boolean } = {}): Promise<LocalBundler> {
+/**
+ * expirationCheck: false when the chain clock is deliberately not the wall clock (a demo history in the past, a chain
+ * moved forward): Alto compares validAfter/validUntil with Date.now(), the paymaster and the contracts use block time.
+ */
+export async function startAlto(rpcUrl: string, entryPoint: Address, o: { port?: number; safeMode?: boolean; expirationCheck?: boolean } = {}): Promise<LocalBundler> {
   // the package exports only "."; the CLI sits next to it (package.json "bin": ./esm/cli/alto.js)
   const bin = resolve(dirname(createRequire(import.meta.url).resolve("@pimlico/alto")), "cli/alto.js");
   const port = o.port ?? 4300 + Math.floor(Math.random() * 600);
-  const args = [bin, "--entrypoints", entryPoint, "--executor-private-keys", BUNDLER_EXECUTOR_KEY, "--utility-private-key", BUNDLER_UTILITY_KEY, "--rpc-url", rpcUrl, "--port", String(port), "--safe-mode", String(o.safeMode ?? false), "--log-level", process.env.ALTO_LOG_LEVEL ?? "warn"];
+  const args = [bin, "--entrypoints", entryPoint, "--executor-private-keys", BUNDLER_EXECUTOR_KEY, "--utility-private-key", BUNDLER_UTILITY_KEY, "--rpc-url", rpcUrl, "--port", String(port), "--safe-mode", String(o.safeMode ?? false), "--expiration-check", String(o.expirationCheck ?? true), "--log-level", process.env.ALTO_LOG_LEVEL ?? "warn"];
   const proc = spawn(process.execPath, args, { stdio: ["ignore", process.env.ALTO_LOG_FILE ? "pipe" : "ignore", "pipe"] });
   if (process.env.ALTO_LOG_FILE) {
     const { createWriteStream } = await import("node:fs");

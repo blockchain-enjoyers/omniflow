@@ -147,3 +147,5 @@
 .tax-actions { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; margin-top: 18px; }
 .tax-actions .hint { margin: 0 0 6px; }
 .btn.disabled { opacity: .5; pointer-events: none; }
+/* a shortened hash or address in a table cell stays on one line */
+td .addr .v { white-space: nowrap; }

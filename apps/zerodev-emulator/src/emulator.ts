@@ -27,6 +27,11 @@ export interface ZeroDevEmulatorConfig {
   paymasterSignerKey: Hex;
   /** paymaster validation gas the emulator reserves; VerifyingPaymaster has no postOp */
   paymasterVerificationGas?: bigint;
+  /**
+   * how long a sponsorship is valid, in seconds of chain time (default 3600); 0 = no expiry (validUntil 0).
+   * A demo chain whose clock is not the wall clock needs 0: Alto simulates bundles with the wall-clock time.
+   */
+  sponsorshipTtlSec?: number;
 }
 
 interface RpcOp {
@@ -55,7 +60,8 @@ export function zerodevEmulator(cfg: ZeroDevEmulatorConfig): Router {
   /** paymasterAndData signed for exactly these gas values (the reference paymaster's hash covers them) */
   async function signPaymaster(op: RpcOp, g: { verificationGasLimit: bigint; callGasLimit: bigint; preVerificationGas: bigint }) {
     const now = Number((await pub.getBlock({ blockTag: "latest" })).timestamp);
-    const validUntil = now + 3600;
+    const ttl = cfg.sponsorshipTtlSec ?? 3600;
+    const validUntil = ttl === 0 ? 0 : now + ttl;
     const validAfter = 0;
     const times = encodeAbiParameters([{ type: "uint48" }, { type: "uint48" }], [validUntil, validAfter]);
     const head = concatHex([cfg.paymaster, pad(numberToHex(pmGas), { size: 16 }), pad("0x0", { size: 16 })]);

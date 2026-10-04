@@ -1,4 +1,4 @@
-import { DEMO, seedDemo } from "./seed.js";
+import { DEMO, HISTORY_DAYS, seedDemo } from "./seed.js";
 import { startStack } from "./stack.js";
 
 /**
@@ -7,6 +7,7 @@ import { startStack } from "./stack.js";
  *   STACK=fork             anvil fork of Arbitrum Sepolia instead of a local chain from source
  *   FORK_URL               RPC for the fork (default: the public Arbitrum Sepolia RPC)
  *   SEED=0                 skip the demo organisation
+ *   HISTORY=0              the demo organisation without its three months of payouts
  *   AA=self                the API bundles itself (default: ZeroDev emulator in front of the Alto bundler)
  *   EXAMPLES=0             no "Open a live example" (each example moves the demo chain's clock a day forward)
  *   EXAMPLE_POOL           live examples kept ready in advance (default 2)
@@ -17,20 +18,25 @@ if (!databaseUrl) {
   process.exit(1);
 }
 const log = (s: string) => console.log(`· ${s}`);
+const seeding = process.env.SEED !== "0";
+const history = process.env.HISTORY !== "0";
 const stack = await startStack({
   databaseUrl,
   fork: process.env.STACK === "fork",
   forkUrl: process.env.FORK_URL,
   aa: process.env.AA === "self" ? "self" : "zerodev",
   log,
-  liveExamples: process.env.EXAMPLES === "0" ? undefined : { pool: Number(process.env.EXAMPLE_POOL ?? 2) },
+  liveExamples: process.env.EXAMPLES === "0" ? undefined : { pool: Number(process.env.EXAMPLE_POOL ?? 2), deferStart: true },
+  // the demo history happens on past dates: the local chain starts that many days ago and catches up to today
+  chainStart: seeding && history ? Math.floor(Date.now() / 1000) - HISTORY_DAYS * 86_400 : undefined,
 });
 
 let demo: Awaited<ReturnType<typeof seedDemo>> | null = null;
 if (process.env.SEED !== "0") {
   log(`demo: organisation "${DEMO.org}", ${DEMO.threshold} of ${DEMO.approvers.length}…`);
-  demo = await seedDemo(stack);
+  demo = await seedDemo(stack, { history, travel: process.env.STACK !== "fork" });
 }
+stack.examples?.start();
 
 console.log(`
 Omniflow — everything is emulated (Privy, ZeroDev, mail, on-ramp, chain). Not Privy, not ZeroDev, not mainnet.
@@ -46,7 +52,8 @@ Omniflow — everything is emulated (Privy, ZeroDev, mail, on-ramp, chain). Not 
 ${
   demo
     ? `
-  demo "${DEMO.org}": account ${demo.account}, ${Number(DEMO.usdc) / 1e6} test USDC
+  demo "${DEMO.org}": account ${demo.account}, ${Number(DEMO.usdc) / 1e6} test USDC${Object.keys(demo.payouts).length ? `
+    history          ${Object.keys(demo.payouts).join(", ")}` : ""}
     operator/admin   ${DEMO.operator}
     approvers        ${DEMO.approvers.join(", ")}  (threshold ${DEMO.threshold})
     sign in: email → code from the dev mailbox`

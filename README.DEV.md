@@ -46,7 +46,13 @@ The command starts:
 - the API with its scheduler (indexer, keeper, recurring payouts);
 - the dashboard and the claim page.
 
-It then creates a demo organisation, **"Demo DAO", 2 of 3**, through the regular HTTP API and puts 100,000 test USDC on its account.
+It then creates a demo organisation, **"Demo DAO", 2 of 3**, through the regular HTTP API, puts 100,000 test USDC on its account and gives it three months of history, so there is something to look at right after signing in:
+
+- July, August and September contributor payouts and a hackathon prizes payout — paid to addresses, claimed by email link, one link that expired and returned, one still unclaimed, one row waiting for details;
+- a W-9 received and a W-8BEN requested, a monthly schedule, a filled address book, reports and the activity log;
+- today: the October payout waiting for its second signature (sign in as `boris@demo.test` or `vera@demo.test` to send it).
+
+On the local chain the history happens on its real dates: anvil starts 98 days ago and its clock is moved forward between the steps; the timestamps the API records are moved to the same dates. On a fork (`STACK=fork`) the same history is created with today's date.
 
 | What | URL |
 |---|---|
@@ -78,6 +84,7 @@ Stop everything with `Ctrl+C`.
 | `FORK_URL` | RPC for the fork (default: `https://sepolia-rollup.arbitrum.io/rpc`) |
 | `AA=self` | no bundler: the API calls `EntryPoint.handleOps` itself (default is the ZeroDev path through Alto) |
 | `SEED=0` | start without the demo organisation |
+| `HISTORY=0` | the demo organisation without its three months of history |
 | `EXAMPLES=0` | turn the live example off |
 | `EXAMPLE_POOL` | how many live examples to keep ready in advance (default 2) |
 | `FOUNDRY_BIN` | directory with `anvil` and `forge` |
