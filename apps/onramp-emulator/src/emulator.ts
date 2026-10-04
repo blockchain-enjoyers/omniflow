@@ -28,6 +28,8 @@ interface Session {
 
 export function onrampEmulator(cfg: OnrampEmulatorConfig) {
   const sessions = new Map<string, Session>();
+  // the path the emulator is served under (a hosted demo puts it behind a prefix); its own links keep it
+  const base = new URL(cfg.publicUrl).pathname.replace(/\/$/, "");
   const r = express.Router();
   r.use(cors({ origin: true }));
   r.use(express.json());
@@ -57,7 +59,7 @@ export function onrampEmulator(cfg: OnrampEmulatorConfig) {
 <h1>Buy ${esc(s.cryptoAmount)} USDC</h1>
 <p>You pay: ${s.fiatAmount} ${esc(s.currency)} · fee ${cfg.feePercent}% (placeholder)</p>
 <p>Destination: <code data-testid="dest">${esc(s.address)}</code><br><small>Check that this is your organization account address.</small></p>
-${s.status === "completed" ? `<p data-testid="done">Done: ${esc(s.cryptoAmount)} USDC credited.</p>${s.returnUrl ? `<p><a href="${esc(s.returnUrl)}">Back</a></p>` : ""}` : `<form method="post" action="/sessions/${s.id}/pay"><button data-testid="pay">Pay by card (demo)</button></form>`}
+${s.status === "completed" ? `<p data-testid="done">Done: ${esc(s.cryptoAmount)} USDC credited.</p>${s.returnUrl ? `<p><a href="${esc(s.returnUrl)}">Back</a></p>` : ""}` : `<form method="post" action="${base}/sessions/${s.id}/pay"><button data-testid="pay">Pay by card (demo)</button></form>`}
 </body></html>`);
   });
 
@@ -69,7 +71,7 @@ ${s.status === "completed" ? `<p data-testid="done">Done: ${esc(s.cryptoAmount)}
       s.status = "completed";
     }
     if (req.is("application/json")) return res.json(s);
-    res.redirect(303, `/widget/${s.id}`);
+    res.redirect(303, `${base}/widget/${s.id}`);
   });
   return r;
 }

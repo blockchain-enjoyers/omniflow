@@ -12,6 +12,9 @@ import { startStack } from "./stack.js";
  *   EXAMPLES=0             no "Open a live example" (each example moves the demo chain's clock a day forward)
  *   EXAMPLE_POOL           live examples kept ready in advance (default 0: built on the click, ~3 s — each one
  *                          moves the demo chain clock a day forward, so none are built until a visitor asks)
+ *   PUBLIC_URL             hosted demo: its public origin (https://…); everything is served from it by path on PORT
+ *   PORT                   hosted demo: the one port the hosting exposes (default 8080)
+ *   TRUST_PROXY            hosted demo: how many proxies of the hosting sit in front (default 1 with PUBLIC_URL)
  */
 const databaseUrl = process.env.DEVSTACK_DATABASE_URL ?? process.env.DATABASE_URL;
 if (!databaseUrl) {
@@ -31,6 +34,9 @@ const stack = await startStack({
   // the demo history happens on past dates: the local chain starts that many days ago and catches up to today
   chainStart: seeding && history ? Math.floor(Date.now() / 1000) - HISTORY_DAYS * 86_400 : undefined,
   demoAccounts: seeding ? demoAccounts(history) : undefined,
+  publicUrl: process.env.PUBLIC_URL || undefined,
+  gatewayPort: process.env.PORT ? Number(process.env.PORT) : undefined,
+  trustProxy: process.env.PUBLIC_URL ? Number(process.env.TRUST_PROXY ?? 1) : undefined,
 });
 
 let demo: Awaited<ReturnType<typeof seedDemo>> | null = null;

@@ -105,6 +105,31 @@ Erin,,,31337,200,contributor
 
 The import also accepts real spreadsheet exports: BOM, comma / semicolon / tab, quoted cells, column aliases in any order, optional `chain_id`, amounts like `1 500,50` or `$1,000.00`.
 
+### Hosted demo
+
+The same stack can run on a host that exposes one port (Railway, Fly, a VM). `Dockerfile.demo` holds everything it needs: anvil and forge, solc, the contracts built at image time. Postgres comes from the host.
+
+```bash
+docker build -f Dockerfile.demo -t omniflow-demo .
+docker run -e PUBLIC_URL=https://demo.example -e DEVSTACK_DATABASE_URL=postgres://USER:PASSWORD@HOST:5432/omniflow_dev -p 8080:8080 omniflow-demo
+```
+
+With `PUBLIC_URL` set, a gateway on `PORT` (default 8080) serves every browser-facing service from that one origin, by path:
+
+| Path | Service |
+|---|---|
+| `/` | dashboard |
+| `/claim/` | claim page |
+| `/api/` | API |
+| `/privy/` | Privy emulator |
+| `/onramp/` | on-ramp emulator |
+| `/rpc` | chain RPC, public subset: read methods and signed transactions; not `anvil_*` / `evm_*`, not `eth_sendTransaction`, not transactions from the stack's own accounts (their keys are anvil's public development keys) |
+
+- Links in emails point to `PUBLIC_URL`. The seed and live examples reach the services inside the machine.
+- `TRUST_PROXY` (default 1): how many proxies of the host sit in front of the gateway, so per-visitor limits see the visitor.
+- Every start recreates the database and the chain and seeds the demo history again (a few minutes): nothing survives a restart.
+- Anyone with the link can read the demo mailbox — sign-in codes included. That is the demo's design: test money only.
+
 ## Tests
 
 ```bash

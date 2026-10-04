@@ -6,13 +6,15 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import express from "express";
 import pg from "pg";
-import { PAYMASTER_SIGNER_KEY, startAlto, startDevStack, SUBMITTER_KEY, type DevStack } from "@omniflow/devchain";
+import { anvilKey, PAYMASTER_SIGNER_KEY, startAlto, startDevStack, SUBMITTER_KEY, type DevStack } from "@omniflow/devchain";
+import { privateKeyToAccount } from "viem/accounts";
 import { zerodevEmulator } from "@omniflow/zerodev-emulator";
 import { PrivyEmulator } from "@omniflow/privy-emulator";
 import { onrampEmulator } from "@omniflow/onramp-emulator";
 import { compose } from "../../api/src/compose.js";
 import { PrivyVerifier } from "../../api/src/auth/privy.js";
 import { LiveExamples } from "./example.js";
+import { startGateway } from "./gateway.js";
 
 /**
  * EMULATION ONLY. Brings the whole application up on one machine: anvil (from source or a
@@ -44,6 +46,15 @@ export interface StackOptions {
   demoAccounts?: { email: string; role: string; note?: string }[];
   /** local chain only: unix time of the first block (the demo history starts months ago and catches up to today) */
   chainStart?: number;
+  /**
+   * hosted demo: the public origin (https://…) and the port it reaches. Every browser-facing service is served from it
+   * by path — dashboard at /, claim page /claim, API /api, sign-in /privy, on-ramp /onramp, chain RPC /rpc (read-only
+   * methods; gateway.ts) — and links in emails point there.
+   */
+  publicUrl?: string;
+  gatewayPort?: number;
+  /** behind the hosting's own proxy: how many proxies sit in front of the gateway (so per-visitor limits see the visitor) */
+  trustProxy?: number;
 }
 
 export interface RunningStack {
@@ -51,7 +62,7 @@ export interface RunningStack {
   db: pg.Pool;
   emulator: PrivyEmulator;
   api: Awaited<ReturnType<typeof compose>>;
-  urls: { rpc: string; api: string; privy: string; onramp: string; web: string; claim: string; zerodev: string | null };
+  urls: { rpc: string; api: string; privy: string; onramp: string; web: string; claim: string; zerodev: string | null; public: string | null };
   examples: LiveExamples | null;
   stop(): Promise<void>;
 }
@@ -86,8 +97,9 @@ export async function prepareDatabase(url: string): Promise<pg.Pool> {
   return db;
 }
 
-function buildFrontend(app: "web" | "claim", env: Record<string, string>) {
-  execFileSync("npx", ["vite", "build", "--outDir", "dist-dev", "--emptyOutDir"], { cwd: resolve(OMNIFLOW, "apps", app), env: { ...process.env, ...env }, stdio: "pipe" });
+function buildFrontend(app: "web" | "claim", env: Record<string, string>, base = "/") {
+  // --base only when it is not the root: a shell on Windows may turn a bare "/" into a filesystem path
+  execFileSync("npx", ["vite", "build", "--outDir", "dist-dev", "--emptyOutDir", ...(base === "/" ? [] : ["--base", base])], { cwd: resolve(OMNIFLOW, "apps", app), env: { ...process.env, ...env }, stdio: "pipe" });
   return resolve(OMNIFLOW, "apps", app, "dist-dev");
 }
 
@@ -97,6 +109,10 @@ export async function startStack(o: StackOptions): Promise<RunningStack> {
   const p = { anvil: 8545, api: 3001, privy: 3010, onramp: 3020, web: 5173, claim: 5174, bundler: 4337, zerodev: 3030, ...o.ports };
   const servers: Server[] = [];
   const children: { kill(): void }[] = [];
+  // what the browser and the emails see: the service's own port, or a path on the hosted demo's one origin
+  const pub = o.publicUrl?.replace(/\/$/, "");
+  const at = (path: string, port: number) => (pub ? `${pub}${path}` : `http://${host}:${port}`);
+  const local = (port: number) => `http://127.0.0.1:${port}`;
 
   log(o.fork ? "anvil: Arbitrum Sepolia fork, deploying escrow and paymaster…" : "anvil: local chain, deploying the stack from source…");
   const chain = await startDevStack({ fork: o.fork, forkUrl: o.forkUrl, port: p.anvil || undefined, contractsDir: CONTRACTS, startTime: o.fork ? undefined : o.chainStart });
@@ -110,7 +126,7 @@ export async function startStack(o: StackOptions): Promise<RunningStack> {
     privyApp.use(emulator.router());
     const privySrv = await listen(privyApp, p.privy);
     servers.push(privySrv);
-    const privyUrl = `http://${host}:${portOf(privySrv)}`;
+    const privyUrl = at("/privy", portOf(privySrv));
 
     // Static frontends: listen first so their URLs are known when the API and the bundles are configured.
     const webApp = express();
@@ -118,13 +134,14 @@ export async function startStack(o: StackOptions): Promise<RunningStack> {
     const webSrv = await listen(webApp, p.web);
     const claimSrv = await listen(claimApp, p.claim);
     servers.push(webSrv, claimSrv);
-    const webUrl = `http://${host}:${portOf(webSrv)}`;
-    const claimUrl = `http://${host}:${portOf(claimSrv)}`;
+    const webUrl = at("", portOf(webSrv));
+    const claimUrl = at("/claim", portOf(claimSrv));
+    if (o.trustProxy !== undefined) webApp.set("trust proxy", o.trustProxy + 1); // the hosting's proxies and the gateway
 
     const onApp = express();
     const onSrv = await listen(onApp, p.onramp);
     servers.push(onSrv);
-    const onrampUrl = `http://${host}:${portOf(onSrv)}`;
+    const onrampUrl = at("/onramp", portOf(onSrv));
     onApp.use(onrampEmulator({ publicUrl: onrampUrl, rpcUrl: chain.rpcUrl, token: chain.token, decimals: 6, feePercent: 1.75 }));
 
     let zerodevUrl: string | null = null;
@@ -149,13 +166,17 @@ export async function startStack(o: StackOptions): Promise<RunningStack> {
       // every link this (demo) backend sends opens in demo mode
       urls: { app: `${webUrl}/?mode=demo`, claim: `${claimUrl}/?mode=demo`, form: `${webUrl}/?mode=demo` },
       paymaster: zerodevUrl ? { zerodev: { url: zerodevUrl } } : { local: { address: chain.paymaster, signerKey: PAYMASTER_SIGNER_KEY } },
-      onramp: { emulatorUrl: onrampUrl },
+      onramp: { emulatorUrl: local(portOf(onSrv)) }, // server to server; the widget link it returns is public
       devEndpoints: true,
       // no explorer: a demo chain's transactions exist nowhere else
       network: { name: "Demo network (test money)" },
+      ...(o.trustProxy !== undefined ? { trustProxy: o.trustProxy + 1 } : {}),
     });
     await api.app.listen(p.api);
-    const apiUrl = `http://${host}:${(api.app.getHttpServer().address() as AddressInfo).port}`;
+    const apiPort = (api.app.getHttpServer().address() as AddressInfo).port;
+    const apiUrl = at("/api", apiPort);
+    const anvilPort = Number(new URL(chain.rpcUrl).port);
+    const rpcUrl = pub ? `${pub}/rpc` : chain.rpcUrl;
 
     // Same origin as the dashboard, so no CORS: the visitor's browser asks for a sandbox of its own.
     let examples: LiveExamples | null = null;
@@ -178,9 +199,27 @@ export async function startStack(o: StackOptions): Promise<RunningStack> {
     );
     claimApp.use(
       express.static(
-        buildFrontend("claim", { VITE_DEMO_RELAYER_URL: apiUrl, VITE_DEMO_AUTH_URL: privyUrl, VITE_DEMO_RPC: chain.rpcUrl, VITE_DEMO_MAILBOX_URL: `${webUrl}/?mode=demo#/demo/mailbox` }),
+        buildFrontend("claim", { VITE_DEMO_RELAYER_URL: apiUrl, VITE_DEMO_AUTH_URL: privyUrl, VITE_DEMO_RPC: rpcUrl, VITE_DEMO_MAILBOX_URL: `${webUrl}/?mode=demo#/demo/mailbox` }, pub ? "/claim/" : "/"),
       ),
     );
+
+    // the hosted demo's one public port, opened last: until then the hosting sees nothing listening
+    if (pub) {
+      const gw = await startGateway(
+        o.gatewayPort ?? 8080,
+        [
+          { prefix: "/api", port: apiPort },
+          { prefix: "/privy", port: portOf(privySrv) },
+          { prefix: "/onramp", port: portOf(onSrv) },
+          { prefix: "/claim", port: portOf(claimSrv) },
+          // the stack's own accounts (deployer, submitter, paymaster signer, bundler…): anvil's first development keys
+          { prefix: "/rpc", port: anvilPort, rpc: { blockedSenders: Array.from({ length: 10 }, (_, i) => privateKeyToAccount(anvilKey(i)).address) } },
+        ],
+        portOf(webSrv),
+      );
+      servers.push(gw);
+      log(`public demo: ${pub} (gateway on port ${portOf(gw)})`);
+    }
 
     // Scheduler: indexer + keeper + recurring payouts. Every step is idempotent.
     let running = false;
@@ -201,7 +240,8 @@ export async function startStack(o: StackOptions): Promise<RunningStack> {
       db,
       emulator,
       api,
-      urls: { rpc: chain.rpcUrl, api: apiUrl, privy: privyUrl, onramp: onrampUrl, web: webUrl, claim: claimUrl, zerodev: zerodevUrl },
+      // api and privy: how this process (the seed, live examples) reaches them — inside the machine when hosted
+      urls: { rpc: chain.rpcUrl, api: pub ? local(apiPort) : apiUrl, privy: pub ? local(portOf(privySrv)) : privyUrl, onramp: onrampUrl, web: webUrl, claim: claimUrl, zerodev: zerodevUrl, public: pub ?? null },
       examples: null,
       async stop() {
         clearInterval(timer);
