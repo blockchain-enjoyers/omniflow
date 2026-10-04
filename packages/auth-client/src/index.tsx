@@ -95,12 +95,20 @@ function PrivyAuth({ children }: { children: ReactNode }) {
 
 // ------------------------------------------------------------------ emulator
 
-interface Session {
+export interface Session {
   accessToken: string;
   identityToken: string;
   user: AuthUser;
 }
 const KEY = "omniflow-emulated-privy-session";
+
+/**
+ * Demo only: start this tab signed in with a session the demo backend issued (a live example's visitor).
+ * The page reloads after this, and the emulator provider picks the session up.
+ */
+export function adoptEmulatedSession(s: Session) {
+  sessionStorage.setItem(KEY, JSON.stringify(s));
+}
 
 function EmulatorAuth({ url, confirm, children }: { url: string; confirm?: (what: string) => Promise<boolean>; children: ReactNode }) {
   const base = url.replace(/\/$/, "");

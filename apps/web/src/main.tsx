@@ -10,7 +10,7 @@ import { PayoutPage } from "./pages/Payout";
 import { ApprovePage } from "./pages/Approve";
 import { FormPage } from "./pages/Form";
 import { Mailbox } from "./pages/Mailbox";
-import { AVAILABLE, chooseMode, CONFIG, MODE } from "./mode";
+import { AVAILABLE, chooseMode, CONFIG, EXAMPLE_AVAILABLE, isLiveExample, MODE, openLiveExample } from "./mode";
 import "@omniflow/ui/base.css";
 import "./style.css";
 
@@ -65,9 +65,42 @@ const Brand = () => (
 const DemoBanner = () =>
   MODE === "demo" ? (
     <div className="demo-banner" data-testid="demo-banner">
-      <b>Demo mode</b> — test money on a demo network. Nothing here is real.
+      {isLiveExample() ? (
+        <><b>Live example</b> — your own copy on a demo network, test money only. Anna and Boris are simulated approvers: they sign after you do.</>
+      ) : (
+        <><b>Demo mode</b> — test money on a demo network. Nothing here is real.</>
+      )}
     </div>
   ) : null;
+
+/** No sign-up: a ready organisation with a payout already carried through (demo backend only). */
+function LiveExampleButton({ className = "" }: { className?: string }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  if (!EXAMPLE_AVAILABLE) return null;
+  return (
+    <>
+      <button
+        className={className}
+        data-testid="live-example"
+        disabled={busy}
+        onClick={async () => {
+          setBusy(true);
+          setErr("");
+          try {
+            await openLiveExample();
+          } catch (e) {
+            setErr((e as Error).message);
+            setBusy(false);
+          }
+        }}
+      >
+        {busy ? "Preparing your example…" : "Open a live example"}
+      </button>
+      {err && <p className="error" data-testid="live-example-error">{err}</p>}
+    </>
+  );
+}
 
 /** Pages without the dashboard around them: the recipient's details form and the demo mailbox. */
 function Bare({ children }: { children: ReactNode }) {
@@ -80,28 +113,50 @@ function Bare({ children }: { children: ReactNode }) {
   );
 }
 
-/** Always a choice between demo and real. */
+const SOURCE_URL = import.meta.env.VITE_SOURCE_URL || "";
+
+/**
+ * The page a visitor lands on: what this is, for whom, what happens to the money — then a live example without
+ * signing up, or the choice between demo and real (always a choice).
+ */
 function ModeChooser() {
   return (
-    <div className="auth-wrap">
-      <div className="auth-card wide">
-        <div className="brand"><span className="logo">O</span> Omniflow</div>
-        <p className="tagline">Stablecoin payouts: an organization pays many people, and each one receives the way that suits them.</p>
+    <div className="landing">
+      <header className="landing-top"><div className="brand"><span className="logo">O</span> Omniflow</div></header>
+      <section className="landing-hero" data-testid="landing">
+        <h1>Stablecoin payouts for organizations that pay many people</h1>
+        <p className="lead">Contributors, grantees, contractors — paid in USDC from your organization's own account, each one the way that suits them.</p>
+        <div className="row landing-cta">
+          <LiveExampleButton />
+          {SOURCE_URL && <a className="btn secondary" href={SOURCE_URL} target="_blank" rel="noreferrer" data-testid="source-link">Source on GitHub</a>}
+        </div>
+        {EXAMPLE_AVAILABLE && <p className="hint small">No sign-up. Test money on a demo network.</p>}
+      </section>
+      <section className="landing-money">
+        <h2>What happens to the money</h2>
+        <ol className="money-list">
+          <li><b>It stays in your organization's account.</b> A smart account controlled by your approvers: every payout needs their signatures, for example 2 of 3. Omniflow cannot move the money without them.</li>
+          <li><b>People with a wallet are paid straight to it.</b> The rest get an email link; the money waits in an escrow contract with no admin until they claim it — or until you take it back.</li>
+          <li><b>Every payment has a record:</b> who requested it, who approved it, and the transaction.</li>
+        </ol>
+      </section>
+      <section className="landing-modes">
+        <h2>Start</h2>
         <div className="grid grid-2 modes">
           <section className="card mode-card" data-testid="mode-card-demo">
             <span className="badge warn">Demo mode</span>
-            <h2>Try the demo</h2>
+            <h3>Try it yourself</h3>
             <p className="hint">Test money on a demo network. Create an organization, pay people, approve and claim — nothing real is moved. Sign-in codes arrive in the demo mailbox.</p>
-            <button className="block" data-testid="mode-demo" disabled={!AVAILABLE.demo} onClick={() => chooseMode("demo")}>{AVAILABLE.demo ? "Open demo" : "Demo is not available here"}</button>
+            <button className="block secondary" data-testid="mode-demo" disabled={!AVAILABLE.demo} onClick={() => chooseMode("demo")}>{AVAILABLE.demo ? "Open demo" : "Demo is not available here"}</button>
           </section>
           <section className="card mode-card" data-testid="mode-card-real">
             <span className="badge ok">Real</span>
-            <h2>Use Omniflow</h2>
+            <h3>Use Omniflow</h3>
             <p className="hint">Real sign-in with email or passkey, a real network and real USDC. For your organization's actual payouts.</p>
             <button className="block secondary" data-testid="mode-real" disabled={!AVAILABLE.real} onClick={() => chooseMode("real")}>{AVAILABLE.real ? "Sign in" : "Not set up yet"}</button>
           </section>
         </div>
-      </div>
+      </section>
     </div>
   );
 }
@@ -135,6 +190,12 @@ function Shell() {
             {MODE === "demo" && <span className="badge warn" style={{ marginBottom: 10 }}>Demo mode</span>}
             <LoginForm title="Sign in to the dashboard" />
           </div>
+          {MODE === "demo" && EXAMPLE_AVAILABLE && (
+            <div className="card" style={{ marginTop: 12 }}>
+              <p className="hint" style={{ marginTop: 0 }}>Or skip signing in: look around an organization that has already paid people.</p>
+              <LiveExampleButton className="block secondary" />
+            </div>
+          )}
           <p className="hint" style={{ textAlign: "center", marginTop: 16 }}>
             {MODE === "demo" && <><a href="#/demo/mailbox" data-testid="mailbox-link">Open the demo mailbox</a> · </>}
             <a href="#" data-testid="mode-change" onClick={(e) => { e.preventDefault(); chooseMode(null); }}>Change mode</a>

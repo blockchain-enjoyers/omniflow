@@ -4,11 +4,13 @@
  *  - real: Privy, a real network, ZeroDev.
  * The choice comes from `?mode=` (links in demo emails carry it), else from this browser's last choice.
  */
+import { adoptEmulatedSession } from "@omniflow/auth-client";
+
 export type Mode = "demo" | "real";
 
 const env = import.meta.env;
 export const CONFIG = {
-  demo: { api: env.VITE_DEMO_API_URL || "", authUrl: env.VITE_DEMO_AUTH_URL || "" },
+  demo: { api: env.VITE_DEMO_API_URL || "", authUrl: env.VITE_DEMO_AUTH_URL || "", exampleUrl: env.VITE_DEMO_EXAMPLE_URL || "" },
   real: { api: env.VITE_API_URL || "", privyAppId: env.VITE_PRIVY_APP_ID || "" },
 };
 export const AVAILABLE: Record<Mode, boolean> = {
@@ -55,3 +57,35 @@ export function chooseMode(m: Mode | null) {
 }
 
 export const apiBase = () => (MODE === "demo" ? CONFIG.demo.api : CONFIG.real.api).replace(/\/$/, "");
+
+const EXAMPLE = "omniflow-live-example";
+
+/** This tab was opened as a live example (its other approvers are simulated). */
+export const isLiveExample = () => {
+  try {
+    return MODE === "demo" && sessionStorage.getItem(EXAMPLE) === "1";
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * "Open a live example": no sign-up — the demo backend builds an organisation with a payout already carried through
+ * and signs this tab in as its admin. Then the page opens on that payout.
+ */
+export async function openLiveExample() {
+  const r = await fetch(CONFIG.demo.exampleUrl, { method: "POST" });
+  const j = await r.json().catch(() => ({ error: r.statusText }));
+  if (!r.ok) throw new Error(j.error ?? "the example could not be prepared");
+  adoptEmulatedSession({ accessToken: j.accessToken, identityToken: j.identityToken, user: j.user });
+  try {
+    localStorage.setItem(KEY, "demo");
+    sessionStorage.setItem(EXAMPLE, "1");
+  } catch {
+    /* without storage the session cannot survive the reload; the error below says so */
+  }
+  window.history.replaceState(null, "", `${window.location.pathname}?mode=demo#/payout/${j.payoutId}`);
+  window.location.reload();
+}
+
+export const EXAMPLE_AVAILABLE = AVAILABLE.demo && Boolean(CONFIG.demo.exampleUrl);

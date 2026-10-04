@@ -12,6 +12,7 @@ import { PrivyEmulator } from "@omniflow/privy-emulator";
 import { onrampEmulator } from "@omniflow/onramp-emulator";
 import { compose } from "../../api/src/compose.js";
 import { PrivyVerifier } from "../../api/src/auth/privy.js";
+import { LiveExamples } from "./example.js";
 
 /**
  * EMULATION ONLY. Brings the whole application up on one machine: anvil (from source or a
@@ -37,6 +38,8 @@ export interface StackOptions {
   /** scheduler period: indexer, keeper, schedules */
   tickMs?: number;
   log?: (s: string) => void;
+  /** "Open a live example": per-visitor sandboxes (example.ts); `pool` = how many are kept ready in advance */
+  liveExamples?: { pool: number };
 }
 
 export interface RunningStack {
@@ -45,6 +48,7 @@ export interface RunningStack {
   emulator: PrivyEmulator;
   api: Awaited<ReturnType<typeof compose>>;
   urls: { rpc: string; api: string; privy: string; onramp: string; web: string; claim: string; zerodev: string | null };
+  examples: LiveExamples | null;
   stop(): Promise<void>;
 }
 
@@ -146,11 +150,23 @@ export async function startStack(o: StackOptions): Promise<RunningStack> {
     await api.app.listen(p.api);
     const apiUrl = `http://${host}:${(api.app.getHttpServer().address() as AddressInfo).port}`;
 
+    // Same origin as the dashboard, so no CORS: the visitor's browser asks for a sandbox of its own.
+    let examples: LiveExamples | null = null;
+    if (o.liveExamples) {
+      webApp.post("/demo/example", async (req, res) => {
+        try {
+          res.json(await examples!.take(req.ip ?? "?"));
+        } catch (e) {
+          res.status((e as { status?: number }).status ?? 500).json({ error: (e as Error).message });
+        }
+      });
+    }
+
     log("building the dashboard and the claim page…");
     webApp.use(
       express.static(
         // demo mode is served here; real mode appears when VITE_API_URL and VITE_PRIVY_APP_ID are in the environment
-        buildFrontend("web", { VITE_DEMO_API_URL: apiUrl, VITE_DEMO_AUTH_URL: privyUrl }),
+        buildFrontend("web", { VITE_DEMO_API_URL: apiUrl, VITE_DEMO_AUTH_URL: privyUrl, ...(o.liveExamples ? { VITE_DEMO_EXAMPLE_URL: `${webUrl}/demo/example` } : {}) }),
       ),
     );
     claimApp.use(
@@ -173,14 +189,16 @@ export async function startStack(o: StackOptions): Promise<RunningStack> {
       }
     }, o.tickMs ?? 3000);
 
-    return {
+    const result: RunningStack = {
       chain,
       db,
       emulator,
       api,
       urls: { rpc: chain.rpcUrl, api: apiUrl, privy: privyUrl, onramp: onrampUrl, web: webUrl, claim: claimUrl, zerodev: zerodevUrl },
+      examples: null,
       async stop() {
         clearInterval(timer);
+        examples?.stop();
         await api.app.close();
         for (const s of servers) s.close();
         for (const c of children) c.kill();
@@ -188,6 +206,12 @@ export async function startStack(o: StackOptions): Promise<RunningStack> {
         chain.anvil.kill();
       },
     };
+    if (o.liveExamples) {
+      examples = new LiveExamples(result, { pool: o.liveExamples.pool, log });
+      result.examples = examples;
+      examples.start();
+    }
+    return result;
   } catch (e) {
     for (const s of servers) s.close();
     for (const c of children) c.kill();

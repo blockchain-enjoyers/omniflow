@@ -8,6 +8,8 @@ import { startStack } from "./stack.js";
  *   FORK_URL               RPC for the fork (default: the public Arbitrum Sepolia RPC)
  *   SEED=0                 skip the demo organisation
  *   AA=self                the API bundles itself (default: ZeroDev emulator in front of the Alto bundler)
+ *   EXAMPLES=0             no "Open a live example" (each example moves the demo chain's clock a day forward)
+ *   EXAMPLE_POOL           live examples kept ready in advance (default 2)
  */
 const databaseUrl = process.env.DEVSTACK_DATABASE_URL ?? process.env.DATABASE_URL;
 if (!databaseUrl) {
@@ -15,7 +17,14 @@ if (!databaseUrl) {
   process.exit(1);
 }
 const log = (s: string) => console.log(`· ${s}`);
-const stack = await startStack({ databaseUrl, fork: process.env.STACK === "fork", forkUrl: process.env.FORK_URL, aa: process.env.AA === "self" ? "self" : "zerodev", log });
+const stack = await startStack({
+  databaseUrl,
+  fork: process.env.STACK === "fork",
+  forkUrl: process.env.FORK_URL,
+  aa: process.env.AA === "self" ? "self" : "zerodev",
+  log,
+  liveExamples: process.env.EXAMPLES === "0" ? undefined : { pool: Number(process.env.EXAMPLE_POOL ?? 2) },
+});
 
 let demo: Awaited<ReturnType<typeof seedDemo>> | null = null;
 if (process.env.SEED !== "0") {

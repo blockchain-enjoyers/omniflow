@@ -323,9 +323,27 @@ describe.skipIf(!DB_URL)("sender side e2e (emulated Privy)", () => {
     await approveAndSubmit((await api.post(`/payouts/${p.body.id}/batches`).set(ops.headers).expect(201)).body.id);
     const before = await balance(account);
     await increaseTime(stack.rpcUrl, 2 * 86_400);
-    expect((await payouts.runKeeper(orgId, new Date(Date.now() + 2 * 86_400_000))).refunded).toBe(1);
+    // no date given: the keeper reads the chain clock, which is now two days ahead of this computer's
+    expect((await payouts.runKeeper(orgId)).refunded).toBe(1);
     expect(await balance(account)).toBe(before + 13_050_000n);
     expect((await api.get(`/payouts/${p.body.id}/receipt`).set(ops.headers).expect(200)).body.payout.status).toBe("closed");
+  });
+
+  it("the keeper does not stop on a deposit someone else already refunded (refundExpired is permissionless)", async () => {
+    const mk = async (name: string) => {
+      const p = await api.post(`/orgs/${orgId}/payouts`).set(ops.headers).send({ title: `expiring ${name}`, rows: [{ name, email: `${name.toLowerCase()}@example.test`, amount: "2" }] }).expect(201);
+      await approveAndSubmit((await api.post(`/payouts/${p.body.id}/batches`).set(ops.headers).expect(201)).body.id);
+      return (await api.get(`/payouts/${p.body.id}/receipt`).set(ops.headers).expect(200)).body as { payout: { id: string }; rows: { depositId: Hex }[] };
+    };
+    const first = await mk("Yuri");
+    const second = await mk("Zara");
+    await increaseTime(stack.rpcUrl, 2 * 86_400);
+    // a stranger refunds the first one before the keeper gets to it
+    await chain.waitTx(await chain.refundExpired(stack.escrow, first.rows[0]!.depositId));
+    expect((await payouts.runKeeper(orgId)).refunded).toBe(1);
+    for (const r of [first, second]) {
+      expect((await api.get(`/payouts/${r.payout.id}/receipt`).set(ops.headers).expect(200)).body.rows[0].status).toBe("refunded");
+    }
   });
 
   // ------------------------------------------------------ address book, repeats, schedules

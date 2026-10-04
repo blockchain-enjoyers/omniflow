@@ -136,7 +136,7 @@ describe.skipIf(!DB_URL)("the application through the browser", () => {
 
   beforeAll(async () => {
     const zero = { anvil: 0, api: 0, privy: 0, onramp: 0, web: 0, claim: 0, bundler: 0, zerodev: 0 };
-    stack = await startStack({ databaseUrl: DB_URL!, fork: process.env.STACK === "fork", forkUrl: process.env.FORK_URL, host: "127.0.0.1", ports: zero, tickMs: 1000 });
+    stack = await startStack({ databaseUrl: DB_URL!, fork: process.env.STACK === "fork", forkUrl: process.env.FORK_URL, host: "127.0.0.1", ports: zero, tickMs: 1000, liveExamples: { pool: 0 } });
     browser = await chromium.launch({ executablePath: CHROMIUM });
   });
 
@@ -519,5 +519,44 @@ describe.skipIf(!DB_URL)("the application through the browser", () => {
     await p.getByTestId("mode-card-demo").waitFor();
     await p.getByTestId("mode-demo").click();
     await p.getByTestId("login-email").waitFor(); // signed out: the demo session did not survive the switch
+  });
+
+  // Last: building an example moves the demo chain's clock a day forward (Frank's link expires for real).
+  it("live example: a visitor with no account lands in a paid-out organization and can send a payout of their own", async () => {
+    const v = await newPage();
+    await v.goto(`${stack.urls.web}/`);
+    await v.getByTestId("landing").waitFor();
+    expect(await v.textContent("body")).toContain("What happens to the money");
+    expect(await v.getByTestId("source-link").count()).toBe(0); // no source URL configured, no dead link
+    await shot(v, "landing");
+    await v.getByTestId("live-example").click();
+    await v.getByTestId("rows").waitFor({ timeout: 60_000 });
+    expect(v.url()).toMatch(/\?mode=demo#\/payout\//);
+    expect(await text(v, "demo-banner")).toContain("Live example");
+    expect(await text(v, "status-Alice")).toContain("sent");
+    expect(await text(v, "status-Carol")).toContain("not claimed");
+    expect(await text(v, "status-Dave")).toContain("needs details");
+    expect(await text(v, "status-Frank")).toContain("returned");
+    await shot(v, "live-example");
+    const orgHref = await v.locator("a.back").getAttribute("href");
+    await v.goto(`${demoUrl()}${orgHref}/reports`);
+    await expect.poll(() => v.textContent("body")).toContain("Frank");
+    await shot(v, "live-example-reports");
+
+    // a payout of their own: they sign, the simulated approver signs after them, the money goes
+    await v.goto(`${demoUrl()}${orgHref}/new`);
+    await v.getByTestId("np-title").fill("My first payout");
+    await v.getByTestId("np-tab-manual").click();
+    await v.getByTestId("np-name-0").fill("Zoe");
+    await v.getByTestId("np-dest-0").fill(privateKeyToAccount(generatePrivateKey()).address);
+    await v.getByTestId("np-amount-0").fill("25");
+    await expect.poll(() => text(v, "np-reason")).toContain("ready");
+    await v.getByTestId("np-create").click();
+    await v.getByTestId("freeze").click();
+    await v.getByTestId("go-sign").click();
+    await signIn(v, "sign");
+    await v.getByTestId("done").waitFor();
+    await v.goBack();
+    await expect.poll(() => text(v, "status-Zoe"), { timeout: 30_000 }).toContain("sent");
   });
 });

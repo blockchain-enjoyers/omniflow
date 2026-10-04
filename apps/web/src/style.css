@@ -92,3 +92,23 @@
   .pending .grow { flex-basis: 100%; }
   .pending .amt { flex: 1; }
 }
+
+/* landing: the first screen a visitor sees */
+.landing { max-width: 880px; margin: 0 auto; padding: 24px 20px 48px; }
+.landing-top { padding: 4px 0 28px; }
+.landing-hero h1 { font-size: 40px; line-height: 1.12; letter-spacing: -0.02em; max-width: 720px; margin: 0 0 14px; }
+.landing-hero .lead { font-size: 18px; color: var(--text-2); max-width: 640px; margin: 0 0 22px; }
+.landing-cta { gap: 10px; margin-bottom: 8px; }
+.landing-cta button, .landing-cta .btn { min-height: 46px; padding: 10px 20px; font-size: 16px; }
+.landing-money, .landing-modes { margin-top: 40px; }
+.landing h2 { font-size: 18px; margin-bottom: 12px; }
+.money-list { margin: 0; padding: 0; list-style: none; counter-reset: money; display: grid; gap: 12px; }
+.money-list li { counter-increment: money; position: relative; padding: 14px 16px 14px 52px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); color: var(--text-2); }
+.money-list li b { color: var(--text); }
+.money-list li::before { content: counter(money); position: absolute; left: 16px; top: 14px; width: 24px; height: 24px; border-radius: 50%; background: var(--accent-soft); color: var(--accent-text); font-weight: 700; font-size: 13px; display: grid; place-items: center; }
+.landing .mode-card h3 { margin: 0; }
+@media (max-width: 720px) {
+  .landing-hero h1 { font-size: 30px; }
+  .landing-hero .lead { font-size: 16px; }
+  .landing-cta > * { flex: 1 1 100%; }
+}

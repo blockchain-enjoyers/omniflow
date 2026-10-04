@@ -497,20 +497,31 @@ export class PayoutService {
     }
   }
 
-  /** Keeper: permissionless refundExpired for due deposits. Anyone could do it; we do it for convenience. */
-  async runKeeper(orgId: string, now = new Date()) {
+  /**
+   * Keeper: permissionless refundExpired for due deposits. Anyone could do it; we do it for convenience.
+   * "Due" is judged by chain time, as the escrow judges it (block.timestamp), not by this server's clock.
+   */
+  async runKeeper(orgId: string, now?: Date) {
+    now ??= new Date(Number((await this.chain.pub.getBlock({ blockTag: "latest" })).timestamp) * 1000);
     const org = await this.org(orgId);
     const { rows } = await this.db.query(
       `SELECT r.deposit_id FROM payout_rows r JOIN payouts p ON p.id=r.payout_id
         WHERE p.org_id=$1 AND r.status='in_escrow' AND r.auto_refund_at IS NOT NULL AND r.auto_refund_at <= $2`,
       [orgId, now],
     );
+    let refunded = 0;
     for (const r of rows) {
-      const h = await this.chain.refundExpired(org.escrow, r.deposit_id);
-      await this.chain.waitTx(h);
+      // refundExpired is permissionless: someone else may have refunded (or the recipient claimed) since the query.
+      // One such deposit must not stop the rest; the indexer below records what actually happened.
+      try {
+        await this.chain.waitTx(await this.chain.refundExpired(org.escrow, r.deposit_id));
+        refunded++;
+      } catch (e) {
+        console.warn(`keeper: deposit ${r.deposit_id} not refunded: ${(e as { shortMessage?: string }).shortMessage ?? (e as Error).message}`);
+      }
     }
     await this.pollEscrow(orgId);
-    return { refunded: rows.length };
+    return { refunded };
   }
 
   // --------------------------------------------------------- close, receipt
