@@ -9,6 +9,8 @@ import { ConfirmHost, Toaster } from "./ui";
 import { PayoutPage } from "./pages/Payout";
 import { ApprovePage } from "./pages/Approve";
 import { FormPage } from "./pages/Form";
+import { RecordPage } from "./pages/Record";
+import { TaxFormPage } from "./pages/TaxForm";
 import { Mailbox } from "./pages/Mailbox";
 import { AVAILABLE, chooseMode, CONFIG, EXAMPLE_AVAILABLE, isLiveExample, MODE, openLiveExample } from "./mode";
 import "@omniflow/ui/base.css";
@@ -209,6 +211,7 @@ function Shell() {
   else if (parts[0] === "setup" && parts[1]) page = <SetupView id={parts[1]} />;
   else if (parts[0] === "org" && parts[1] && parts[2] === "new") page = <NewPayout orgId={parts[1]} />;
   else if (parts[0] === "org" && parts[1]) page = <OrgPage id={parts[1]} tab={parts[2] ?? "payouts"} />;
+  else if (parts[0] === "payout" && parts[1] && parts[2] === "record" && parts[3]) page = <RecordPage payoutId={parts[1]} row={parts[3]} />;
   else if (parts[0] === "payout" && parts[1]) page = <PayoutPage id={parts[1]} />;
   else if (parts[0] === "approve" && parts[1]) page = <ApprovePage batchId={parts[1]} />;
   const email = auth.user.email ?? auth.user.did;
@@ -242,6 +245,7 @@ function App() {
   const parts = path.split("/").filter(Boolean);
   // public pages: no sign-in, no choice to make — a details-form link already belongs to one mode
   if (parts[0] === "form") return <Bare><div className="narrow"><FormPage token={parts[1]!} /></div></Bare>;
+  if (parts[0] === "tax-form") return <Bare><div className="narrow"><TaxFormPage token={parts[1]!} /></div></Bare>;
   if (parts[0] === "demo" && parts[1] === "mailbox" && MODE === "demo") return <Bare><Mailbox /></Bare>;
   if (!MODE) return <ModeChooser />;
   return (

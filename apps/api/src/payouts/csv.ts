@@ -16,7 +16,7 @@ export interface CsvProblem {
   message: string;
 }
 
-export type Field = "name" | "email" | "address" | "amount" | "chain_id" | "category";
+export type Field = "name" | "email" | "address" | "amount" | "chain_id" | "category" | "doc_required";
 
 const ALIASES: Record<Field, string[]> = {
   name: ["name", "recipient", "recipient name", "full name", "fullname", "payee", "contributor", "person", "имя", "получатель", "фио"],
@@ -25,7 +25,9 @@ const ALIASES: Record<Field, string[]> = {
   amount: ["amount", "usdc", "amount (usdc)", "amount usdc", "amount, usdc", "sum", "value", "payment", "pay", "сумма"],
   chain_id: ["chain_id", "chain id", "chainid", "chain", "network", "сеть"],
   category: ["category", "tag", "memo", "note", "purpose", "категория"],
+  doc_required: ["doc_required", "doc required", "document", "tax form", "form"],
 };
+const DOC: Record<string, "none" | "w9" | "w8ben" | "w8bene"> = { "": "none", none: "none", w9: "w9", "w-9": "w9", w8ben: "w8ben", "w-8ben": "w8ben", w8bene: "w8bene", "w-8ben-e": "w8bene", "w8ben-e": "w8bene" };
 const CHAIN_NAMES: Record<string, number> = { arbitrum: 42161, "arbitrum one": 42161, "arbitrum sepolia": 421614 };
 const MAX_ROWS = 5000;
 
@@ -132,6 +134,7 @@ export interface RowInput {
   amount?: string;
   chain?: string;
   category?: string;
+  docRequired?: string;
 }
 
 /** One row, from a file or typed by hand: the same rules either way. */
@@ -151,6 +154,9 @@ export function validateRow(r: RowInput, line: number, decimals: number, default
     if (!n) errors.push({ line, column: "chain_id", message: `"${chain}" is not a known chain` });
     else chainId = n;
   }
+  const docKey = (r.docRequired ?? "").trim().toLowerCase().replace(/s+/g, "");
+  const doc = DOC[docKey];
+  if (doc === undefined) errors.push({ line, column: "doc_required", message: `"${r.docRequired?.trim()}" is not a form — use w9, w8ben, w8bene or leave it empty` });
   let amount = 0n;
   const a = normalizeAmount(r.amount ?? "");
   if ("error" in a) errors.push({ line, column: "amount", message: a.error });
@@ -174,6 +180,7 @@ export function validateRow(r: RowInput, line: number, decimals: number, default
       chainId,
       amount,
       category: (r.category ?? "").trim() || undefined,
+      ...(doc && doc !== "none" ? { docRequired: doc } : {}),
     },
   };
 }
@@ -202,7 +209,7 @@ export function parsePayoutCsv(text: string, decimals: number, defaultChainId: n
   if (missing.length) {
     return {
       rows,
-      errors: [{ line: 1, message: `the first line must name the columns; missing: ${missing.join(", ")}. Expected columns: name, amount, and address or email (optional: category, chain_id)` }],
+      errors: [{ line: 1, message: `the first line must name the columns; missing: ${missing.join(", ")}. Expected columns: name, amount, and address or email (optional: category, chain_id, doc_required)` }],
       warnings,
       columns,
       delimiter,
@@ -214,7 +221,7 @@ export function parsePayoutCsv(text: string, decimals: number, defaultChainId: n
   const cell = (r: string[], f: Field) => (index[f] === undefined ? undefined : r[index[f]!]);
   for (const r of recs) {
     const v = validateRow(
-      { name: cell(r.cells, "name"), email: cell(r.cells, "email"), address: cell(r.cells, "address"), amount: cell(r.cells, "amount"), chain: cell(r.cells, "chain_id"), category: cell(r.cells, "category") },
+      { name: cell(r.cells, "name"), email: cell(r.cells, "email"), address: cell(r.cells, "address"), amount: cell(r.cells, "amount"), chain: cell(r.cells, "chain_id"), category: cell(r.cells, "category"), docRequired: cell(r.cells, "doc_required") },
       r.line,
       decimals,
       defaultChainId,

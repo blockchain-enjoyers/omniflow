@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react";
 import { useAuth } from "@omniflow/auth-client";
-import { call, download, type Batch, type Org, type Receipt, type Review, type ReviewRow } from "../api";
+import { call, type Batch, type Org, type Receipt, type Review, type ReviewRow } from "../api";
 import { Addr, Badge, Callout, confirmAction, dateTime, Err, Section, short, Table, toast, usdc, useAction, useLoad, usePoll } from "../ui";
 
 const who = (r: ReviewRow) => `${r.name}${r.address ? ` · ${short(r.address)}` : ""}${r.email ? ` · ${r.email}` : ""}`;
@@ -70,18 +70,19 @@ export function PayoutPage({ id }: { id: string }) {
       </span>,
       <span className="num">{usdc(r.amount)}</span>,
       <Badge s={r.status} testid={`status-${r.name}`} extra={r.failReason ? ` (${r.failReason})` : ""} />,
+      <span data-testid={`document-${r.name}`}>{r.document}</span>,
       <Addr value={r.txHash} />,
       editable(r.status) && !closed && !e ? (
         <button className="ghost sm" data-testid={`edit-${r.name}`} onClick={() => setEdit({ ...edit, [r.row]: { amount: String(Number(r.amount) / 1e6), address: r.address ?? "", email: r.email ?? "" } })}>Edit</button>
       ) : RECORDED.includes(r.status) ? (
-        <button
-          className="ghost sm"
+        <a
+          className="btn ghost sm"
           data-testid={`record-${r.name}`}
-          title="A page with who paid whom, who approved it and the transaction — to keep, print or save as PDF"
-          onClick={a.run(() => download(auth.headers, `/payouts/${id}/rows/${r.row}/record`, `omniflow-record-${r.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}.html`, "text/html"))}
+          title="Who paid whom, who approved it, the transaction, and the documents — with the record as a PDF"
+          href={`#/payout/${id}/record/${r.row}`}
         >
           Download record
-        </button>
+        </a>
       ) : null,
     ];
   };
@@ -184,7 +185,7 @@ export function PayoutPage({ id }: { id: string }) {
 
       <Section flush title="Rows" testid="rows" actions={<button className="ghost sm" data-testid="refresh" onClick={reload}>Refresh</button>}>
         <Table
-          cols={[...(selectable ? [{ label: "" }] : []), { label: "Recipient", primary: true }, { label: "Amount", className: "r" }, { label: "Status" }, { label: "Transaction" }, { label: "" }]}
+          cols={[...(selectable ? [{ label: "" }] : []), { label: "Recipient", primary: true }, { label: "Amount", className: "r" }, { label: "Status" }, { label: "Document" }, { label: "Transaction" }, { label: "" }]}
           rows={rows.map((r) => ({ key: r.row, cells: selectable ? rowCells(r) : rowCells(r).slice(1) }))}
         />
         {picked.length > 0 && (

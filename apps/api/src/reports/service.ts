@@ -1,6 +1,7 @@
 import { formatUnits, type Address } from "viem";
 import type { Db } from "../db/db.js";
 import { RecordService, type NetworkInfo } from "./record.js";
+import { documentLabel } from "../documents/irs.js";
 
 /** USD value at the time of the operation. Where the number comes from is always part of the report. */
 export interface PriceSource {
@@ -31,6 +32,8 @@ export interface ReportLine {
   status: string;
   txHash: string | null;
   claimedAt: string | null;
+  /** DOCUMENT column: empty, "requested", or the form received (W-9, W-8BEN, W-8BEN-E) */
+  document: string;
 }
 
 const STATUS_LABEL: Record<string, string> = { sent: "sent", in_escrow: "claim link sent, not yet claimed", claimed: "claimed via link", refunded: "returned to sender" };
@@ -69,6 +72,7 @@ export class ReportService {
         status: r.status,
         txHash: r.tx_hash,
         claimedAt: r.claimed_at ? new Date(r.claimed_at).toISOString() : null,
+        document: documentLabel(r.doc_required, r.doc_status),
       });
     }
     return out;

@@ -33,6 +33,7 @@ const STUB_FINAL_SIGNATURE: Hex =
   "0xfffffffffffffffffffffffffffffff0000000000000000000000000000000007aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1c";
 import type { Mailer } from "../mail/mailer.js";
 import { parsePayoutCsv, validateRow, type CsvProblem, type RowInput } from "./csv.js";
+import { documentLabel } from "../documents/irs.js";
 
 export class HttpError extends Error {
   /** details: machine-readable problems the UI shows next to the fields (e.g. CSV lines) */
@@ -141,9 +142,9 @@ export class PayoutService {
         const status: RowStatus =
           r.chainId !== org.chain_id ? "other_chain" : !r.address && !r.email ? "waiting_details" : "ready";
         await c.query(
-          `INSERT INTO payout_rows (payout_id, row_key, name, email, address, chain_id, amount, status, category, details_source)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-          [payoutId, r.rowId, r.name, r.email ?? null, r.address ?? null, r.chainId, r.amount.toString(), status, r.category ?? null, input.source],
+          `INSERT INTO payout_rows (payout_id, row_key, name, email, address, chain_id, amount, status, category, details_source, doc_required)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+          [payoutId, r.rowId, r.name, r.email ?? null, r.address ?? null, r.chainId, r.amount.toString(), status, r.category ?? null, input.source, r.docRequired ?? "none"],
         );
       }
       return { id: payoutId, rows: rows.length };
@@ -566,6 +567,7 @@ export class PayoutService {
         failReason: r.fail_reason,
         txHash: r.tx_hash,
         depositId: r.deposit_id,
+        document: documentLabel(r.doc_required, r.doc_status),
       })),
     };
   }
@@ -750,6 +752,8 @@ interface DbRow {
   deposit_id: string | null;
   fail_reason: string | null;
   tx_hash: string | null;
+  doc_required: string;
+  doc_status: string;
 }
 
 const toPayoutRow = (r: DbRow): PayoutRow => ({

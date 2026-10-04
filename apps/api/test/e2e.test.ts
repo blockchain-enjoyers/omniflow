@@ -1,6 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import request from "supertest";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
+import { PDFDocument, StandardFonts } from "pdf-lib";
+import * as pdfjs from "pdfjs-dist/legacy/build/pdf.mjs";
 import { createPublicClient, createWalletClient, erc20Abi, http, type Address, type Hex } from "viem";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { claimEscrowAbi, DepositStatus, kernelInitData, parseClaimLink, signClaim } from "@omniflow/shared";
@@ -452,6 +454,109 @@ describe.skipIf(!DB_URL)("sender side e2e (emulated Privy)", () => {
     await api.get(`/payouts/${draft.body.id}/rows/${dr}/record`).set(ops.headers).expect(404);
   });
 
+  it("documents: the record PDF reads line by line like the page; a W-9 is requested, uploaded, passed on by email and never stored; a 1099-NEC Copy B is filled", async () => {
+    const rc = (await api.get(`/payouts/${payoutId}/receipt`).set(ops.headers).expect(200)).body as { rows: { row: string; name: string; document: string }[] };
+    const rowOf = (name: string) => rc.rows.find((r) => r.name === name)!.row;
+    // the dashboard page and the PDF come from the same lines
+    const rec = (await api.get(`/payouts/${payoutId}/rows/${rowOf("Carol")}/record.json`).set(a3.headers).expect(200)).body;
+    expect(rec.title).toMatch(/^\d+ USDC to Carol$/);
+    expect(rec.lines.map((l: { label: string }) => l.label)).toEqual(["Paid by", "Paid to", "Amount", "Value in USD", "Date", "Category", "Payout", "Requested by", "Approved by", "How it reached the recipient", "Network", "Transaction", "Claim transaction"]);
+    expect(rec.documents).toMatchObject({ status: "none", label: "", destination: null, canRequest: { ok: false } });
+    const pdfRes = await api.get(`/payments/${rec.rowId}/record.pdf`).set(ops.headers).buffer(true).parse(binary).expect(200);
+    expect(pdfRes.headers["content-type"]).toBe("application/pdf");
+    expect(pdfRes.headers["content-disposition"]).toBe(`attachment; filename="payment-record-${rec.rowId}.pdf"`);
+    const pdfText = await textOf(pdfRes.body);
+    expect(pdfText[0]).toMatchObject({ pages: 1 });
+    const t = pdfText[0]!.text;
+    expect(t).toContain("OMNIFLOW");
+    expect(t).toContain("PAYMENT RECORD");
+    for (const l of rec.lines as { label: string; values: { text: string }[] }[]) {
+      expect(t).toContain(l.label);
+      for (const v of l.values) expect(t.replace(/\s+/g, "")).toContain(v.text.replace(/\s+/g, ""));
+    }
+    const flat = t.replace(/\s+/g, " ");
+    expect(flat).toContain("not a tax form and not tax advice");
+    expect(flat).toContain(`Record ${payoutId} / ${rowOf("Carol")}`);
+    await api.get(`/payments/${rec.rowId}/record.pdf`).set(outsider.headers).expect(403);
+    await api.get(`/payments/not-a-row/record.pdf`).set(ops.headers).expect(404);
+
+    // a request needs somewhere to put the form and an email to reach the recipient
+    await api.post(`/payouts/${payoutId}/rows/${rowOf("Carol")}/document-request`).set(ops.headers).send({ type: "w9" }).expect(409);
+    await api.patch(`/orgs/${orgId}/settings`).set(ops.headers).send({ docDestination: "not-an-email" }).expect(400);
+    await api.patch(`/orgs/${orgId}/settings`).set(a2.headers).send({ docDestination: "forms@acme.test" }).expect(403);
+    const st = (await api.patch(`/orgs/${orgId}/settings`).set(ops.headers).send({ docDestination: "Forms@Acme.test" }).expect(200)).body;
+    expect(st.doc_destination).toBe("forms@acme.test");
+    expect(st.auto_refund_days).toBeTruthy(); // the other setting is untouched
+    await api.post(`/payouts/${payoutId}/rows/${rowOf("Alice")}/document-request`).set(ops.headers).send({ type: "w9" }).expect(409); // no email
+    await api.post(`/payouts/${payoutId}/rows/${rowOf("Carol")}/document-request`).set(ops.headers).send({ type: "w2" }).expect(400);
+    await api.post(`/payouts/${payoutId}/rows/${rowOf("Carol")}/document-request`).set(a2.headers).send({ type: "w9" }).expect(403); // approvers do not request
+    const req = (await api.post(`/payouts/${payoutId}/rows/${rowOf("Carol")}/document-request`).set(ops.headers).send({ type: "w9" }).expect(201)).body;
+    expect(req).toMatchObject({ status: "requested", label: "requested", required: "w9" });
+    expect(req.requestedAt).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect((await api.get(`/payouts/${payoutId}/receipt`).set(ops.headers).expect(200)).body.rows.find((r: { name: string }) => r.name === "Carol").document).toBe("requested");
+    expect((await api.get(`/orgs/${orgId}/reports/payments`).set(ops.headers).expect(200)).body.find((l: { recipient: string }) => l.recipient === "Carol").document).toBe("requested");
+
+    // the recipient: the link from the email, the official blank as it is, the signed form back
+    const mail = (await inbox("carol@example.test")).find((m) => /needs a tax form from you/.test(m.subject))!;
+    const token = mail.body.match(/#\/tax-form\/(\S+)/)![1]!;
+    const view = (await api.get(`/tax-forms/${token}`).expect(200)).body;
+    expect(view).toMatchObject({ org: expect.any(String), name: "Carol", received: null });
+    expect(view.forms.map((f: { label: string; revision: string }) => `${f.label} ${f.revision}`)).toEqual(["W-9 March 2024", "W-8BEN October 2021", "W-8BEN-E October 2021"]);
+    const blank = await api.get(`/tax-forms/blank/w9`).buffer(true).parse(binary).expect(200);
+    expect(createHash("sha256").update(blank.body).digest("hex")).toBe("2d420cbb4123dcf1fb82595b2359cfbb5d81f00b9df9d359fcc7af361d093f53");
+    await api.get(`/tax-forms/blank/w2`).expect(404);
+    await api.get(`/tax-forms/not-a-token`).expect(404);
+    await api.post(`/tax-forms/${token}`).send({ type: "w9", contentBase64: Buffer.from("hello").toString("base64") }).expect(400);
+    const signed = await signedPdf("CAROL-SIGNED-W9-MARKER");
+    const up = (await api.post(`/tax-forms/${token}`).send({ type: "w9", filename: "w9.pdf", contentBase64: Buffer.from(signed).toString("base64") }).expect(201)).body;
+    expect(up).toMatchObject({ form: "W-9", sha256: createHash("sha256").update(signed).digest("hex") });
+    const sent = (await inbox("forms@acme.test"))[0]!;
+    expect(sent.subject).toBe("W-9 from Carol");
+    expect(sent.attachments).toHaveLength(1);
+    expect(sent.attachments[0]).toMatchObject({ contentType: "application/pdf", size: signed.length, sha256: up.sha256 });
+    const att = await api.get(`/dev/mailbox/${sent.id}/attachments/0`).buffer(true).parse(binary).expect(200);
+    expect(Buffer.compare(att.body, Buffer.from(signed))).toBe(0);
+    // stored: type, date, hash — not the file, anywhere in the database
+    const row = (await db.query(`SELECT doc_required, doc_status, doc_received_at, doc_hash FROM payout_rows WHERE payout_id=$1 AND row_key=$2`, [payoutId, rowOf("Carol")])).rows[0];
+    expect(row).toMatchObject({ doc_required: "w9", doc_status: "received", doc_hash: up.sha256 });
+    expect(row.doc_received_at).toBeTruthy();
+    const b64 = Buffer.from(signed).toString("base64").slice(0, 40);
+    const leaks = await db.query(
+      `SELECT table_name, column_name FROM information_schema.columns WHERE table_schema='public' AND data_type IN ('text','jsonb','bytea','character varying')`,
+    );
+    for (const c of leaks.rows) {
+      const hit = await db.query(`SELECT 1 FROM "${c.table_name}" WHERE "${c.column_name}"::text LIKE $1 OR "${c.column_name}"::text LIKE $2 LIMIT 1`, ["%CAROL-SIGNED-W9-MARKER%", `%${b64}%`]);
+      expect(hit.rowCount, `${c.table_name}.${c.column_name} holds the form`).toBe(0);
+    }
+    expect((await api.get(`/tax-forms/${token}`).expect(200)).body.received).toMatchObject({ form: "W-9" });
+    expect((await api.get(`/payouts/${payoutId}/receipt`).set(ops.headers).expect(200)).body.rows.find((r: { name: string }) => r.name === "Carol").document).toBe("W-9");
+    expect((await api.get(`/payouts/${payoutId}/rows/${rowOf("Carol")}/record.json`).set(ops.headers).expect(200)).body.documents).toMatchObject({ status: "received", label: "W-9", hash: up.sha256, destination: "forms@acme.test" });
+
+    // year-end: only recipients with a W-9 on file; the amount is ours, the TINs are typed in and not kept
+    const year = new Date(rec.lines.find((l: { label: string }) => l.label === "Date").values[0].text.replace(" UTC", "Z").replace(" ", "T")).getUTCFullYear();
+    const ye = (await api.get(`/orgs/${orgId}/reports/year-end`).query({ year }).set(a3.headers).expect(200)).body;
+    expect(ye.form).toMatchObject({ name: "1099-NEC", revision: "December 2026", copy: "Copy B — For Recipient" });
+    expect(ye.recipients.map((r: { name: string }) => r.name)).toEqual(["Carol"]);
+    const carol = ye.recipients[0];
+    expect(Number(carol.usd)).toBeGreaterThanOrEqual(250);
+    const nec = (body: object) => api.post(`/orgs/${orgId}/reports/year-end/1099-nec`).set(ops.headers).send({ year, recipient: carol.key, payer: { name: "Acme Inc.", street: "1 Main St", city: "Springfield", state: "IL", zip: "62701", tin: "12-3456789" }, recipientInfo: { tin: "123-45-6789", street: "9 Elm St", city: "Austin", state: "TX", zip: "73301" }, ...body });
+    await nec({ recipientInfo: { tin: "123" } }).expect(400);
+    await nec({ recipient: "0xnot-on-file" }).expect(404);
+    await nec({ year: 2025 }).expect(400);
+    await api.post(`/orgs/${orgId}/reports/year-end/1099-nec`).set(a2.headers).send({ year, recipient: carol.key }).expect(403);
+    const form = await nec({}).buffer(true).parse(binary).expect(201);
+    expect(form.headers["content-disposition"]).toBe(`attachment; filename="1099-nec-carol-${year}.pdf"`);
+    const pages = await textOf(form.body);
+    expect(pages[0]!.pages).toBe(2);
+    expect(pages[0]!.text).toContain("Copy B");
+    expect(pages[0]!.text).toContain("For Recipient");
+    expect(pages[1]!.text).toContain("Instructions for Recipient");
+    expect(pages.map((p) => p.text).join(" ")).not.toContain("Copy A");
+    for (const v of ["Acme Inc.", "12-3456789", "Carol", "123-45-6789", carol.usd, String(year)]) expect(pages[0]!.text).toContain(v);
+    const audit = (await db.query(`SELECT details::text FROM audit_log WHERE action='document.1099nec'`)).rows.map((r) => r.details).join(" ");
+    expect(audit).not.toContain("123-45-6789");
+  });
+
   it("CSV export neutralises formulas in names from uploaded files", async () => {
     const p = await api.post(`/orgs/${orgId}/payouts`).set(ops.headers).send({ title: "inj", csv: `name,email,address,chain_id,amount\n=HYPERLINK(\"x\"),,${bob},${CHAIN},1` }).expect(201);
     await approveAndSubmit((await api.post(`/payouts/${p.body.id}/batches`).set(ops.headers).expect(201)).body.id);
@@ -567,3 +672,30 @@ describe.skipIf(!DB_URL)("sender side e2e (emulated Privy)", () => {
     }
   });
 });
+
+/** supertest: collect a binary body (PDF) as a Buffer */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function binary(res: any, cb: (err: Error | null, body: Buffer) => void) {
+  const chunks: Buffer[] = [];
+  res.on("data", (c: Buffer) => chunks.push(Buffer.from(c)));
+  res.on("end", () => cb(null, Buffer.concat(chunks)));
+}
+
+/** text of every page of a PDF (as a reader would extract it) */
+async function textOf(bytes: Buffer) {
+  const pdf = await pdfjs.getDocument({ data: new Uint8Array(bytes), verbosity: 0 }).promise;
+  const out: { pages: number; text: string }[] = [];
+  for (let p = 1; p <= pdf.numPages; p++) {
+    const items = (await (await pdf.getPage(p)).getTextContent()).items as { str: string }[];
+    out.push({ pages: pdf.numPages, text: items.map((i) => i.str).join(" ") });
+  }
+  return out;
+}
+
+/** stands in for a form the recipient signed and scanned */
+async function signedPdf(marker: string) {
+  const doc = await PDFDocument.create();
+  const page = doc.addPage();
+  page.drawText(marker, { x: 50, y: 700, size: 12, font: await doc.embedFont(StandardFonts.Helvetica) });
+  return doc.save({ useObjectStreams: false });
+}

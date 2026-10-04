@@ -15,6 +15,8 @@ export interface PayoutRow {
   amount: bigint;
   /** accounting category for reports */
   category?: string;
+  /** a tax form the payer expects from this recipient (preselected when requesting one); never part of a batch */
+  docRequired?: "w9" | "w8ben" | "w8bene";
 }
 
 /** A row frozen into a batch — everything needed to rebuild calldata byte for byte. */

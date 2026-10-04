@@ -3,7 +3,7 @@ import type { Db } from "../db/db.js";
 import type { PriceSource } from "./service.js";
 
 /**
- * Payment record (site changes 04.10, item 2): one page per payment — who paid whom, how much, when, who asked for it,
+ * Payment record: one page per payment — who paid whom, how much, when, who asked for it,
  * who approved it, how it reached the recipient, and the transaction. A record of a payment, not a tax form: the
  * title and the footer say so, and the USD value says where it comes from.
  */

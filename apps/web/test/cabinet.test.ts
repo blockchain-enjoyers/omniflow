@@ -289,18 +289,24 @@ describe.skipIf(!DB_URL)("the application through the browser", () => {
     await expect.poll(() => text(o, "trail")).toContain(`Requested by ${ops}`);
     expect(await text(o, "trail")).toContain(`approved by ${a1}, ${a2}`);
     await shot(o, "payout-sent");
-    const [rec] = await Promise.all([o.waitForEvent("download"), o.getByTestId("record-Alice").click()]);
-    const page = readFileSync((await rec.path())!, "utf8");
-    expect(rec.suggestedFilename()).toBe("omniflow-record-alice.html");
-    expect(page).toContain("Payment record");
-    expect(page).toContain(`Requested by</th><td>${ops}`);
-    expect(page).toContain("not a tax form");
-    // the record opens as a page of its own (what the person will print or save as PDF)
-    const viewer = await o.context().newPage();
-    await viewer.setContent(page);
-    expect(await viewer.locator("h1").first().textContent()).toBe("1000 USDC to Alice");
-    await shot(viewer, "payment-record");
-    await viewer.close();
+    expect(await text(o, "document-Alice")).toBe("");
+    await o.getByTestId("record-Alice").click();
+    await expect.poll(() => o.getByTestId("record-title").textContent()).toBe("1000 USDC to Alice");
+    const lines = await text(o, "record-lines");
+    expect(lines).toContain(`Requested by${ops}`);
+    expect(lines).toContain("How it reached the recipient");
+    expect(await text(o, "record")).toContain("not a tax form");
+    // documents: nothing on file; a request needs an email and a place for received forms
+    expect(await text(o, "form-on-file")).toBe("None");
+    expect(await o.getByTestId("request-form").isDisabled()).toBe(true);
+    expect(await text(o, "request-why")).toContain("no email address");
+    expect(await text(o, "documents")).toContain("You choose what a payment needs. We do not give tax advice.");
+    await shot(o, "payment-record");
+    const [pdf] = await Promise.all([o.waitForEvent("download"), o.getByTestId("record-pdf").click()]);
+    expect(pdf.suggestedFilename()).toMatch(/^payment-record-[0-9a-f-]{36}\.pdf$/);
+    expect(readFileSync((await pdf.path())!).subarray(0, 5).toString()).toBe("%PDF-");
+    await o.goto(payoutUrl);
+    await o.getByTestId("rows").waitFor();
   });
 
   it("Carol opens the emailed link, logs in by email and receives into her embedded wallet", async () => {
@@ -327,6 +333,50 @@ describe.skipIf(!DB_URL)("the application through the browser", () => {
     await expect.poll(() => page.getByTestId("status").textContent()).toBe("This payment has already been claimed.");
     const o = pages[ops]!;
     await expect.poll(() => statusOf(o, "Carol"), { timeout: 30_000 }).toBe("claimed");
+  });
+
+  it("documents: the admin says where forms go; Carol is asked for a form, picks it herself, uploads it; the payer gets it by email", async () => {
+    const o = pages[ops]!;
+    await o.goto(`${orgUrl}/settings`);
+    await o.getByTestId("doc-destination").fill("forms@acme.test");
+    await o.getByTestId("doc-destination-save").click();
+    await expect.poll(async () => (await o.getByTestId("doc-destination").inputValue())).toBe("forms@acme.test");
+    await o.goto(payoutUrl);
+    await o.getByTestId("record-Carol").click();
+    await o.getByTestId("request-form").click();
+    await o.getByTestId("request-type").selectOption("w9");
+    await o.getByTestId("request-send").click();
+    await expect.poll(() => text(o, "form-on-file")).toMatch(/^Requested \d{4}-\d{2}-\d{2}$/);
+    await o.goto(payoutUrl);
+    await expect.poll(() => text(o, "document-Carol")).toBe("requested");
+
+    const link = await linkIn("carol@example.test", /needs a tax form from you/, stack.urls.web);
+    const page = await newPage();
+    await page.goto(link);
+    await page.getByTestId("tax-form").waitFor();
+    await expect.poll(() => text(page, "tax-form")).toContain("Acme needs a form from you before this payment can be reported.");
+    // nothing is preselected: the recipient decides which form applies
+    for (const t of ["w9", "w8ben", "w8bene"]) expect(await page.getByTestId(`tax-form-${t}`).isChecked()).toBe(false);
+    expect(await page.getByTestId("tax-form-blank").getAttribute("href")).toBeNull();
+    await shot(page, "tax-form");
+    await page.getByTestId("tax-form-w9").check();
+    expect(await page.getByTestId("tax-form-blank").getAttribute("href")).toMatch(/\/tax-forms\/blank\/w9$/);
+    expect(await text(page, "tax-form-revision")).toBe("This is the official IRS form, Rev. March 2024. We do not fill it for you and we do not check it.");
+    await page.getByTestId("tax-form-upload").setInputFiles({ name: "w9-signed.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4\n% a signed W-9 stands here\n%%EOF\n") });
+    await page.getByTestId("tax-form-done").waitFor();
+    expect(await text(page, "tax-form-done")).toMatch(/^Your W-9 was sent to Acme on \d{4}-\d{2}-\d{2}/);
+    await shot(page, "tax-form-done");
+    const toPayer = (await mail("forms@acme.test")).find((m) => /W-9 from Carol/.test(m.subject))!;
+    expect(toPayer.attachments).toHaveLength(1);
+
+    await o.goto(payoutUrl);
+    await expect.poll(async () => { await o.getByTestId("refresh").click(); return text(o, "document-Carol"); }).toBe("W-9");
+    await o.getByTestId("record-Carol").click();
+    await expect.poll(() => text(o, "form-on-file")).toMatch(/^W-9 · received \d{4}-\d{2}-\d{2}$/);
+    expect(await text(o, "form-sent-to")).toBe("Sent to forms@acme.test by email");
+    await shot(o, "payment-record-form");
+    await o.goto(payoutUrl);
+    await o.getByTestId("rows").waitFor();
   });
 
   it("Dave gets a details form link and fills in his address; the row becomes ready", async () => {
@@ -488,6 +538,20 @@ describe.skipIf(!DB_URL)("the application through the browser", () => {
     expect(all).toContain("to Alice");
     expect(all).toContain("to Carol");
     expect(recs.suggestedFilename()).toBe("omniflow-Acme-payment-records.html");
+    expect(await text(p, "report-document-Carol")).toBe("W-9");
+    expect(await p.getByTestId("year-end").isDisabled()).toBe(false);
+    await p.getByTestId("year-end").click();
+    await p.getByTestId("year-end-forms").waitFor();
+    expect(await text(p, "year-end-forms")).toContain("Rev. December 2026 — Copy B — For Recipient");
+    expect(await text(p, "year-end-table")).toContain("Carol");
+    expect(await text(p, "year-end-table")).not.toContain("Alice");
+    await p.getByTestId("payer-tin").fill("12-3456789");
+    await p.getByTestId("payer-street").fill("1 Main St");
+    await p.getByTestId("tin-Carol").fill("123-45-6789");
+    await shot(p, "year-end");
+    const [nec] = await Promise.all([p.waitForEvent("download"), p.getByTestId("nec-Carol").click()]);
+    expect(nec.suggestedFilename()).toMatch(/^1099-nec-carol-\d{4}\.pdf$/);
+    expect(readFileSync((await nec.path())!).subarray(0, 5).toString()).toBe("%PDF-");
   });
 
   it("the dev mailbox lists the letters", async () => {

@@ -82,6 +82,7 @@ Stop everything with `Ctrl+C`.
 | `EXAMPLE_POOL` | how many live examples to keep ready in advance (default 2) |
 | `FOUNDRY_BIN` | directory with `anvil` and `forge` |
 | `ALTO_LOG_LEVEL`, `ALTO_LOG_FILE` | bundler logging |
+| `DEV_MAILBOX_FILES` | where the demo mailbox keeps email attachments (default: the OS temp directory); the database keeps only their name, size and SHA-256 |
 
 ### Example CSV for a payout
 
@@ -171,6 +172,13 @@ ESCROW_TOKENS=0xTokenA,0xTokenB forge script script/DeployEscrow.s.sol \
 ```
 
 The script refuses tokens that have no code on the target chain. Put the printed address into `ESCROW`.
+
+## Documents
+
+- **Payment record** — `GET /payments/:rowId/record.pdf`, built with `pdf-lib` (A4, Helvetica) from the same lines as the record page in the dashboard.
+- **Tax forms from recipients** (W-9, W-8BEN, W-8BEN-E) — requested from the record page; the recipient picks the form, downloads the official blank and uploads the signed PDF. The file is emailed to the address in *Settings → Documents*; the API keeps only the form type, the date and the SHA-256.
+- **Year-end Form 1099-NEC** — *Reports → Year-end forms*: Copy B (for the recipient) and its instructions page, filled for each recipient with a W-9 on file. Box 1 is the sum of the year's payments from the payment data; TINs and addresses are typed in and not stored. Copy A is never produced.
+- The official IRS PDFs are kept unchanged in `apps/api/assets/irs/`; their source URL, revision and SHA-256 are in `apps/api/src/documents/irs.ts`.
 
 ## Repository layout
 

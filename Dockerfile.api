@@ -18,6 +18,7 @@ RUN --mount=type=secret,id=ca,required=false \
 COPY packages/shared packages/shared
 COPY packages/devmail packages/devmail
 COPY apps/api/src apps/api/src
+COPY apps/api/assets apps/api/assets
 COPY apps/api/tsconfig.json apps/api/
 
 USER node

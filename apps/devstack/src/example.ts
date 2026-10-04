@@ -6,7 +6,7 @@ import { emulatedLogin, emulatedSign, type DemoUser } from "./seed.js";
 import type { RunningStack } from "./stack.js";
 
 /**
- * EMULATION ONLY — "Open a live example" (site changes 04.10, item 1). Each visitor gets an organisation of their own,
+ * EMULATION ONLY — "Open a live example". Each visitor gets an organisation of their own,
  * built through the same HTTP API the dashboard uses, with one payout already carried through:
  *   Alice — paid to her address; Carol — claim link emailed, not claimed; Dave — waiting for payment details;
  *   Frank — claim link not used, returned to the account when it expired.

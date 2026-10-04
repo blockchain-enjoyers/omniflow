@@ -213,3 +213,23 @@ ALTER TABLE payout_rows ADD COLUMN IF NOT EXISTS claimed_to text;         -- rec
 ALTER TABLE payout_rows ADD COLUMN IF NOT EXISTS refunded_at timestamptz;
 ALTER TABLE payout_rows ADD COLUMN IF NOT EXISTS refund_by_expiry boolean; -- Refunded(byExpiry)
 ALTER TABLE payout_rows ADD COLUMN IF NOT EXISTS settle_tx text;          -- the claim or refund transaction
+
+-- documents. The recipient's filled form is never stored: it goes to the payer (doc_destination), we keep type, date, hash.
+ALTER TABLE payout_rows ADD COLUMN IF NOT EXISTS doc_required text NOT NULL DEFAULT 'none';    -- none | w9 | w8ben | w8bene
+ALTER TABLE payout_rows ADD COLUMN IF NOT EXISTS doc_status text NOT NULL DEFAULT 'none';      -- none | requested | received
+ALTER TABLE payout_rows ADD COLUMN IF NOT EXISTS doc_received_at timestamptz;
+ALTER TABLE payout_rows ADD COLUMN IF NOT EXISTS doc_hash text;                                -- sha-256 of the uploaded file
+ALTER TABLE payout_rows DROP CONSTRAINT IF EXISTS payout_rows_doc_required_check;
+ALTER TABLE payout_rows ADD CONSTRAINT payout_rows_doc_required_check CHECK (doc_required IN ('none','w9','w8ben','w8bene'));
+ALTER TABLE payout_rows DROP CONSTRAINT IF EXISTS payout_rows_doc_status_check;
+ALTER TABLE payout_rows ADD CONSTRAINT payout_rows_doc_status_check CHECK (doc_status IN ('none','requested','received'));
+ALTER TABLE orgs ADD COLUMN IF NOT EXISTS doc_destination text;                                -- where received forms go: an email address
+-- a form request link per row. Only the hash of the token is stored.
+CREATE TABLE IF NOT EXISTS doc_requests (
+  id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  row_id       uuid NOT NULL REFERENCES payout_rows(id),
+  token_hash   text UNIQUE NOT NULL,
+  expires_at   timestamptz NOT NULL,
+  fulfilled_at timestamptz,
+  created_at   timestamptz NOT NULL DEFAULT now()
+);

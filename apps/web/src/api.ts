@@ -48,6 +48,7 @@ export interface Org {
   escrow: string;
   threshold: number;
   auto_refund_days: number | null;
+  doc_destination: string | null;
   approvers: { address: string; weight: number }[];
   myRoles: string[];
 }
@@ -62,7 +63,7 @@ export interface Review {
     outliers: { row: ReviewRow; previous: string }[]; notSent: { row: ReviewRow; reason: string }[];
   };
 }
-export interface ReceiptRow { row: string; name: string; email: string | null; address: string | null; amount: string; status: string; executed: boolean; failReason: string | null; txHash: string | null; depositId: string | null }
+export interface ReceiptRow { row: string; name: string; email: string | null; address: string | null; amount: string; status: string; executed: boolean; failReason: string | null; txHash: string | null; depositId: string | null; document: string }
 export interface Receipt { payout: { id: string; title: string; status: string; closedAt: string | null; orgId: string; chainId: number }; rows: ReceiptRow[] }
 export interface Batch { id: string; batch_no: number; kind: string; status: string; approve_hash: string; tx_hash: string | null; created_at: string; requested_by: string | null; threshold: number; signedWeight: number; signers: Signer[] }
 export type NextStep =
@@ -77,6 +78,52 @@ export interface PreviewRow { line: number; name: string; email?: string; addres
 export interface Preview { rows: PreviewRow[]; errors: Problem[]; warnings: Problem[]; total: string; chainId: number }
 export interface PendingApproval { batchId: string; kind: string; payoutId: string; title: string; orgId: string; org: string; rows: number; total: string; createdAt: string }
 export interface Signer { address: string; weight: number; email: string | null; signed: boolean; signedAt: string | null }
+
+/** A PDF (or any binary) from the API, saved as a file. GET by default; POST sends a JSON body. */
+export async function downloadBinary(headers: Headers | null, path: string, filename: string, body?: unknown) {
+  const r = await fetch(`${apiBase()}${path}`, {
+    method: body === undefined ? "GET" : "POST",
+    headers: { "content-type": "application/json", ...(headers ? await headers() : {}) },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  if (!r.ok) {
+    const t = await r.text();
+    let msg = `${r.status}`;
+    try {
+      msg = (JSON.parse(t) as { error?: string }).error ?? msg;
+    } catch {
+      /* not JSON */
+    }
+    throw new Error(msg);
+  }
+  const url = URL.createObjectURL(await r.blob());
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+export type FormType = "w9" | "w8ben" | "w8bene";
+export const FORM_LABEL: Record<FormType, string> = { w9: "W-9", w8ben: "W-8BEN", w8bene: "W-8BEN-E" };
+export interface RowDocuments {
+  required: FormType | "none";
+  status: "none" | "requested" | "received";
+  label: string;
+  receivedAt: string | null;
+  requestedAt: string | null;
+  hash: string | null;
+  destination: string | null;
+  canRequest: { ok: boolean; reason?: string };
+}
+export interface RecordLine { label: string; values: { text: string; mono?: boolean; note?: boolean; strong?: boolean }[] }
+export interface RecordView { rowId: string; orgId: string; title: string; sub: string; lines: RecordLine[]; footer: string; documents: RowDocuments }
+export interface YearEnd {
+  year: number;
+  years: number[];
+  form: { name: string; revision: string; copy: string; firstYear: number };
+  recipients: { key: string; name: string; email: string | null; address: string | null; usd: string; payments: number }[];
+}
 
 /** Saves what the API returns (a CSV, a payment record) as a file — the API needs the sign-in headers, so no plain link. */
 export async function download(headers: Headers, path: string, filename: string, type: string) {

@@ -262,16 +262,27 @@ export class OrgService {
   }
 
   async settings(orgId: string) {
-    const { rows } = await this.db.query(`SELECT id, name, chain_id, account, token, escrow, threshold, auto_refund_days FROM orgs WHERE id=$1`, [orgId]);
+    const { rows } = await this.db.query(`SELECT id, name, chain_id, account, token, escrow, threshold, auto_refund_days, doc_destination FROM orgs WHERE id=$1`, [orgId]);
     if (!rows[0]) throw new HttpError(404, "org not found");
     const approvers = (await this.db.query(`SELECT address, weight FROM approvers WHERE org_id=$1`, [orgId])).rows;
     return { ...rows[0], approvers };
   }
 
-  /** organisation default for auto-refund; each payout can override it. */
-  async updateSettings(orgId: string, u: AuthUser, s: { autoRefundDays: number | null }) {
-    if (s.autoRefundDays !== null && !(Number.isInteger(s.autoRefundDays) && s.autoRefundDays > 0)) throw new HttpError(400, "autoRefundDays must be a positive integer or null");
-    await this.db.query(`UPDATE orgs SET auto_refund_days=$2 WHERE id=$1`, [orgId, s.autoRefundDays]);
+  /**
+   * organisation default for auto-refund (each payout can override it), and where received tax forms go.
+   * Only the fields present change.
+   */
+  async updateSettings(orgId: string, u: AuthUser, s: { autoRefundDays?: number | null; docDestination?: string | null }) {
+    if (s.autoRefundDays !== undefined) {
+      if (s.autoRefundDays !== null && !(Number.isInteger(s.autoRefundDays) && s.autoRefundDays > 0)) throw new HttpError(400, "autoRefundDays must be a positive integer or null");
+      await this.db.query(`UPDATE orgs SET auto_refund_days=$2 WHERE id=$1`, [orgId, s.autoRefundDays]);
+    }
+    if (s.docDestination !== undefined) {
+      const v = s.docDestination?.trim().toLowerCase() || null;
+      // received forms are emailed to the payer; a storage link would need an integration that does not exist yet
+      if (v && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v)) throw new HttpError(400, "enter an email address — received forms are sent there by email");
+      await this.db.query(`UPDATE orgs SET doc_destination=$2 WHERE id=$1`, [orgId, v]);
+    }
     await this.audit(orgId, u.did, "settings.updated", s);
     return this.settings(orgId);
   }

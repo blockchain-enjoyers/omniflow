@@ -12,6 +12,7 @@ import {
   Query,
   Req,
   Res,
+  StreamableFile,
   UseFilters,
   UseGuards,
   type ArgumentsHost,
@@ -20,7 +21,7 @@ import {
 import type { Address, Hex } from "viem";
 import { getAddress } from "viem";
 import type pg from "pg";
-import { readDevMailbox } from "@omniflow/devmail";
+import { readDevAttachment, readDevMailbox } from "@omniflow/devmail";
 import { HttpError, PayoutService } from "../payouts/service.js";
 import type { RowInput } from "../payouts/csv.js";
 import type { ChainClient } from "../chain/chain.js";
@@ -120,7 +121,7 @@ export class OrgController {
   }
 
   @Patch(":id/settings")
-  async settings(@Req() r: Rq, @Param("id") id: string, @Body() b: { autoRefundDays: number | null }) {
+  async settings(@Req() r: Rq, @Param("id") id: string, @Body() b: { autoRefundDays?: number | null; docDestination?: string | null }) {
     await this.orgs.requireRole(id, r.user, ["admin"]);
     return this.orgs.updateSettings(id, r.user, b);
   }
@@ -312,6 +313,15 @@ export class DevController {
   async mailbox(@Query("to") to?: string) {
     if (!this.extra.devEndpoints) throw new HttpError(404, "not found");
     return readDevMailbox(this.db, to);
+  }
+
+  /** an attachment as the recipient of the letter would open it (the file lives on disk, not in the database) */
+  @Get("mailbox/:id/attachments/:n")
+  async attachment(@Param("id") id: string, @Param("n") n: string) {
+    if (!this.extra.devEndpoints) throw new HttpError(404, "not found");
+    const a = await readDevAttachment(this.db, id, Number(n));
+    if (!a) throw new HttpError(404, "not found");
+    return new StreamableFile(a.content, { type: a.contentType, disposition: `attachment; filename="${a.filename}"` });
   }
 }
 

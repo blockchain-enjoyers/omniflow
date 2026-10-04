@@ -117,3 +117,33 @@
 .trail b { color: var(--text); font-weight: 600; }
 .batch-trail .cell-sub { overflow-wrap: anywhere; }
 @media (max-width: 720px) { .step { min-width: 0; font-size: 12px; } }
+
+/* payment record page: the same lines as the PDF */
+.rec-head { display: flex; justify-content: space-between; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--text-2); }
+.rec-brand { font-weight: 700; color: var(--accent); }
+.rec-title { margin: 14px 0 0; }
+.kv { display: grid; grid-template-columns: minmax(0, 34%) minmax(0, 1fr); margin: 18px 0 0; }
+.kv dt, .kv dd { margin: 0; padding: 10px 0; border-top: 1px solid var(--border); }
+.kv dt { font-weight: 600; color: var(--text-2); padding-right: 12px; }
+.kv dd { display: flex; flex-direction: column; gap: 2px; overflow-wrap: anywhere; min-width: 0; }
+.kv .docs-label { color: var(--text); }
+.kv .docs { background: var(--surface-2); border-radius: 8px; padding: 10px 12px; margin: 6px 0; border-top: 0; }
+.doc-row { display: grid; grid-template-columns: 110px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 4px 0; }
+.doc-k { color: var(--text-2); font-size: 13px; }
+.doc-a { justify-self: end; }
+@media (max-width: 720px) {
+  .kv { grid-template-columns: 1fr; }
+  .kv dt { padding-bottom: 0; border-top: 1px solid var(--border); }
+  .kv dd { border-top: 0; padding-top: 4px; }
+  .doc-row { grid-template-columns: 1fr; gap: 4px; }
+  .doc-a { justify-self: start; }
+}
+/* recipient's tax form page */
+.choice { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; cursor: pointer; }
+.choice:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
+.choice input[type=radio] { width: 18px; height: 18px; min-width: 18px; flex: none; margin: 0; padding: 0; }
+.choice > span:nth-child(2) { flex: 1; min-width: 0; }
+.choice > span:nth-child(3) { flex: none; white-space: nowrap; }
+.tax-actions { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; margin-top: 18px; }
+.tax-actions .hint { margin: 0 0 6px; }
+.btn.disabled { opacity: .5; pointer-events: none; }

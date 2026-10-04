@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import QRCode from "qrcode";
 import { useAuth } from "@omniflow/auth-client";
-import { call, download, type Org, type PayoutListItem } from "../api";
+import { call, download, downloadBinary, type Org, type PayoutListItem, type YearEnd } from "../api";
 import { Addr, Badge, Callout, chainName, confirmAction, date, dateTime, Err, Field, Section, Stat, Table, toast, usdc, useAction, useLoad } from "../ui";
 
 const TABS: [string, string][] = [
@@ -236,9 +236,13 @@ function Reports({ org }: { org: Org }) {
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const q = `${from ? `from=${from}&` : ""}${to ? `to=${to}&` : ""}`;
-  const lines = useLoad(() => call<{ date: string; payout: string; recipient: string; amount: string; usdValue: string; category: string | null; status: string; txHash: string | null; priceSource: string }[]>(auth.headers, "GET", `/orgs/${org.id}/reports/payments?${q}`), [org.id, q]);
+  const lines = useLoad(() => call<{ date: string; payout: string; recipient: string; amount: string; usdValue: string; category: string | null; status: string; txHash: string | null; priceSource: string; document: string }[]>(auth.headers, "GET", `/orgs/${org.id}/reports/payments?${q}`), [org.id, q]);
   const a = useAction();
+  const [yearEnd, setYearEnd] = useState(false);
+  const ye = useLoad(() => call<YearEnd>(auth.headers, "GET", `/orgs/${org.id}/reports/year-end`), [org.id]);
+  const anyForm = (ye.data?.recipients.length ?? 0) > 0;
   return (
+    <>
     <Section
       flush
       title="Payments report"
@@ -257,6 +261,9 @@ function Reports({ org }: { org: Org }) {
           <button className="secondary" data-testid="csv" onClick={a.run(() => download(auth.headers, `/orgs/${org.id}/reports/payments?${q}format=csv`, `omniflow-${org.name}-payments.csv`, "text/csv"))}>
             Export CSV
           </button>
+          <button className="secondary" data-testid="year-end" disabled={!anyForm} title={anyForm ? "Form 1099-NEC, Copy B, for each recipient with a W-9 on file" : "No forms on file yet"} onClick={() => setYearEnd(!yearEnd)}>
+            Year-end forms
+          </button>
         </div>
       }
     >
@@ -266,15 +273,18 @@ function Reports({ org }: { org: Org }) {
       </div>
       <Table
         testid="report-table"
-        cols={[{ label: "Recipient", primary: true }, { label: "Date" }, { label: "Payout" }, { label: "Amount", className: "r" }, { label: "USD", className: "r" }, { label: "Category" }, { label: "Status" }, { label: "Hash" }]}
+        cols={[{ label: "Recipient", primary: true }, { label: "Date" }, { label: "Payout" }, { label: "Amount", className: "r" }, { label: "USD", className: "r" }, { label: "Category" }, { label: "Status" }, { label: "Document" }, { label: "Hash" }]}
         rows={(lines.data ?? []).map((l, i) => ({
           key: String(i),
-          cells: [<span className="cell-main">{l.recipient}</span>, dateTime(l.date), l.payout, <span className="num">{l.amount}</span>, <span className="num">{l.usdValue}</span>, l.category ?? "—", <Badge s={l.status} />, <Addr value={l.txHash} />],
+          cells: [<span className="cell-main">{l.recipient}</span>, dateTime(l.date), l.payout, <span className="num">{l.amount}</span>, <span className="num">{l.usdValue}</span>, l.category ?? "—", <Badge s={l.status} />, <span data-testid={`report-document-${l.recipient}`}>{l.document}</span>, <Addr value={l.txHash} />],
         }))}
         empty="No payments in this period."
       />
+      {!anyForm && <p className="hint small" style={{ padding: "0 20px" }} data-testid="year-end-none">No forms on file yet</p>}
       <div style={{ padding: "0 20px" }}><Err e={lines.error || a.error} /></div>
     </Section>
+    {yearEnd && anyForm && <YearEndForms org={org} />}
+    </>
   );
 }
 
@@ -335,7 +345,28 @@ function Settings({ org, onSaved }: { org: Org; onSaved: () => void }) {
         )}
         <Err e={a.error} />
       </Section>
+      <DocumentsSettings org={org} onSaved={onSaved} />
     </div>
+  );
+}
+
+function DocumentsSettings({ org, onSaved }: { org: Org; onSaved: () => void }) {
+  const auth = useAuth();
+  const [dest, setDest] = useState(org.doc_destination ?? "");
+  const a = useAction();
+  const isAdmin = org.myRoles.includes("admin");
+  return (
+    <Section title="Documents" testid="documents-settings">
+      <Field label="Where to put received forms" help="An email address. Forms that recipients upload are sent there; Omniflow keeps only their type, date and fingerprint.">
+        <input type="email" data-testid="doc-destination" disabled={!isAdmin} value={dest} onChange={(e) => setDest(e.target.value.trim())} placeholder="forms@company.com" />
+      </Field>
+      {isAdmin && (
+        <div className="actions" style={{ marginTop: 0 }}>
+          <button data-testid="doc-destination-save" onClick={a.run(async () => { await call(auth.headers, "PATCH", `/orgs/${org.id}/settings`, { docDestination: dest || null }); toast("Saved"); onSaved(); })}>Save</button>
+        </div>
+      )}
+      <Err e={a.error} />
+    </Section>
   );
 }
 
@@ -344,7 +375,7 @@ const ACTION: Record<string, string> = {
   "batch.revoke_frozen": "revoke sent for approval", "batch.rekey_frozen": "new links sent for approval", "batch.approved": "signed", "batch.submitted": "submitted on chain",
   "forms.created": "details forms created", "settings.updated": "settings changed", "member.invited": "operator invited", "member.removed": "operator removed", "payout.closed": "payout closed",
   "book.saved": "recipient saved", "book.deleted": "recipient deleted", "onramp.session": "USDC purchase", "row.added": "row added", "row.edited": "row edited",
-  "schedule.created": "recurring payout", "setup.started": "setup started", "setup.joined": "approver joined", "setup.confirmed": "approver set signed",
+  "schedule.created": "recurring payout", "document.requested": "tax form requested", "document.received": "tax form received", "document.1099nec": "1099-NEC prepared", "setup.started": "setup started", "setup.joined": "approver joined", "setup.confirmed": "approver set signed",
 };
 
 function Audit({ org }: { org: Org }) {
@@ -361,6 +392,64 @@ function Audit({ org }: { org: Org }) {
         }))}
       />
       <div style={{ padding: "0 20px" }}><Err e={log.error} /></div>
+    </Section>
+  );
+}
+
+/**
+ * Form 1099-NEC, Copy B, for each recipient with a W-9 on file. Box 1 is the sum of the year's payments from our data;
+ * the TINs and addresses are typed here from the payer's records and the recipient's W-9, fill the form, and are not stored.
+ */
+function YearEndForms({ org }: { org: Org }) {
+  const auth = useAuth();
+  const [year, setYear] = useState<number | null>(null);
+  const ye = useLoad(() => call<YearEnd>(auth.headers, "GET", `/orgs/${org.id}/reports/year-end${year ? `?year=${year}` : ""}`), [org.id, year]);
+  const [payer, setPayer] = useState({ name: org.name, street: "", city: "", state: "", zip: "", phone: "", tin: "" });
+  const [rec, setRec] = useState<Record<string, { tin: string; street: string; city: string; state: string; zip: string }>>({});
+  const a = useAction();
+  const y = ye.data;
+  const P = (k: keyof typeof payer, label: string, wide = false) => (
+    <Field label={label}><input className={wide ? "" : "w-amount"} data-testid={`payer-${k}`} value={payer[k]} onChange={(e) => setPayer({ ...payer, [k]: e.target.value })} /></Field>
+  );
+  return (
+    <Section title="Year-end forms" desc={y ? `Form ${y.form.name}, Rev. ${y.form.revision} — ${y.form.copy}. Only the copy the IRS allows to print is produced.` : ""} testid="year-end-forms">
+      <div className="row" style={{ marginBottom: 12 }}>
+        <label className="row small muted">Year <select className="input-inline" data-testid="year-end-year" value={y?.year ?? ""} onChange={(e) => setYear(Number(e.target.value))}>{(y?.years ?? []).map((v) => <option key={v} value={v}>{v}</option>)}</select></label>
+      </div>
+      <h3 style={{ marginTop: 0 }}>Payer</h3>
+      <div className="grid grid-3">
+        {P("name", "Legal name", true)}
+        {P("tin", "TIN (EIN)")}
+        {P("phone", "Telephone")}
+        {P("street", "Street address", true)}
+        {P("city", "City or town")}
+        <div className="row">{P("state", "State")}{P("zip", "ZIP")}</div>
+      </div>
+      <h3>Recipients with a W-9 on file</h3>
+      <Table
+        testid="year-end-table"
+        cols={[{ label: "Recipient", primary: true }, { label: "Paid in year", className: "r" }, { label: "TIN from W-9" }, { label: "Address from W-9" }, { label: "" }]}
+        rows={(y?.recipients ?? []).map((r) => {
+          const v = rec[r.key] ?? { tin: "", street: "", city: "", state: "", zip: "" };
+          const set = (patch: Partial<typeof v>) => setRec({ ...rec, [r.key]: { ...v, ...patch } });
+          return {
+            key: r.key,
+            cells: [
+              <span><span className="cell-main">{r.name}</span><span className="cell-sub small muted">{r.email ?? r.address}</span></span>,
+              <span className="num">{r.usd} USD</span>,
+              <input className="w-amount" data-testid={`tin-${r.name}`} placeholder="123-45-6789" value={v.tin} onChange={(e) => set({ tin: e.target.value })} />,
+              <span className="stack">
+                <input data-testid={`street-${r.name}`} placeholder="street" value={v.street} onChange={(e) => set({ street: e.target.value })} />
+                <span className="row"><input className="w-amount" placeholder="city" value={v.city} onChange={(e) => set({ city: e.target.value })} /><input className="w-amount" placeholder="state" value={v.state} onChange={(e) => set({ state: e.target.value })} /><input className="w-amount" placeholder="ZIP" value={v.zip} onChange={(e) => set({ zip: e.target.value })} /></span>
+              </span>,
+              <button className="secondary sm" data-testid={`nec-${r.name}`} disabled={a.busy} onClick={a.run(() => downloadBinary(auth.headers, `/orgs/${org.id}/reports/year-end/1099-nec`, `1099-nec-${r.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${y!.year}.pdf`, { year: y!.year, recipient: r.key, payer, recipientInfo: v }))}>Download 1099-NEC</button>,
+            ],
+          };
+        })}
+        empty="No recipient with a W-9 on file in this year."
+      />
+      <p className="hint small" style={{ marginTop: 10 }}>TINs and addresses fill the form and are not stored. Nothing is filed with the IRS here.</p>
+      <Err e={ye.error || a.error} />
     </Section>
   );
 }

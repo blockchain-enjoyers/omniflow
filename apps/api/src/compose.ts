@@ -5,6 +5,7 @@ import { ClaimKeyVault } from "./claimkeys/vault.js";
 import { DevMailboxMailer, type Mailer } from "./mail/mailer.js";
 import { PayoutService } from "./payouts/service.js";
 import { FormService } from "./payouts/forms.js";
+import { DocumentService } from "./documents/service.js";
 import { OrgService } from "./orgs/service.js";
 import { PrivyVerifier } from "./auth/privy.js";
 import { Erc7677Paymaster, LocalVerifyingPaymaster, ZeroDevPaymaster } from "./chain/paymaster.js";
@@ -70,7 +71,9 @@ export async function compose(cfg: ComposeConfig) {
   const forms = new FormService(db, mailer, cfg.urls.form);
   const lists = new ListService(db, payouts, mailer, cfg.urls.app, cfg.tokenDecimals ?? 6);
   payouts.afterSettle = (payoutId) => lists.rememberPaid(payoutId);
-  const reports = new ReportService(db, new StablecoinParity(), cfg.tokenDecimals ?? 6, "USDC", cfg.network);
+  const price = new StablecoinParity();
+  const reports = new ReportService(db, price, cfg.tokenDecimals ?? 6, "USDC", cfg.network);
+  const docs = new DocumentService(db, mailer, price, cfg.tokenDecimals ?? 6, cfg.urls.form);
   const onramp = !cfg.onramp ? null : "emulatorUrl" in cfg.onramp ? new EmulatedOnramp(cfg.onramp.emulatorUrl) : cfg.onramp;
   const monitor = new Monitor(db, chain, cfg.monitor);
   /** One scheduler pass: indexer, keeper, stuck batches, recurring payouts, then the health alerts. Idempotent. */
@@ -85,10 +88,10 @@ export async function compose(cfg: ComposeConfig) {
       : "emulatorUrl" in cfg.privy
         ? await PrivyVerifier.fromEmulator(cfg.privy.emulatorUrl)
         : await PrivyVerifier.fromPem(cfg.privy.verificationKeyPem, cfg.privy.appId);
-  const app = await createApp({ db, payouts, orgs, forms, lists, reports, onramp, chain, verifier, devEndpoints: cfg.devEndpoints ?? false,
+  const app = await createApp({ db, payouts, orgs, forms, docs, lists, reports, onramp, chain, verifier, devEndpoints: cfg.devEndpoints ?? false,
     corsOrigins: cfg.corsOrigins === "any" ? "any" : [...new Set([cfg.urls.app, cfg.urls.claim, cfg.urls.form, ...(cfg.corsOrigins ?? [])].map((u) => new URL(u).origin))],
     trustProxy: cfg.trustProxy,
     monitor,
   });
-  return { app, db, chain, payouts, orgs, forms, lists, reports, mailer, tick, monitor };
+  return { app, db, chain, payouts, orgs, forms, docs, lists, reports, mailer, tick, monitor };
 }

@@ -12,6 +12,14 @@ describe("CSV import as people export it", () => {
     expect(r.rows[0]).toMatchObject({ name: "Alice", address: A, chainId: 42161, amount: 1_000_000_000n, category: "grants", line: 2 });
   });
 
+  it("an optional doc_required column names the tax form expected from a recipient", () => {
+    const r = parse(`name,address,amount,doc_required\nAlice,${A},10,w9\nBob,${A},10,W-8BEN-E\nCarol,${A},10,\nDan,${A},10,none`);
+    expect(r.errors).toEqual([]);
+    expect(r.rows.map((x) => x.docRequired)).toEqual(["w9", "w8bene", undefined, undefined]);
+    const bad = parse(`name,address,amount,doc_required\nAlice,${A},10,w2`);
+    expect(bad.errors).toEqual([{ line: 2, column: "doc_required", message: `"w2" is not a form — use w9, w8ben, w8bene or leave it empty` }]);
+  });
+
   it("Excel: BOM, semicolons, CRLF, decimal comma, columns in another order, no chain_id", () => {
     const r = parse(`﻿Amount;Wallet;Name;Email\r\n1 500,50;${A};Alice;\r\n25;;Bob;bob@example.com\r\n`);
     expect(r.delimiter).toBe(";");
