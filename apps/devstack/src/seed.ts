@@ -313,7 +313,7 @@ class History {
 }
 
 /** A stand-in for a signed W-9 the recipient scanned: a minimal valid PDF. */
-const SIGNED_FORM = `%PDF-1.4
+export const SIGNED_FORM = `%PDF-1.4
 1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
 2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj
 3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >> endobj

@@ -2,7 +2,8 @@ import { randomBytes } from "node:crypto";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import type { Address } from "viem";
 import { mintToken } from "@omniflow/devchain";
-import { emulatedLogin, emulatedSign, type DemoUser } from "./seed.js";
+import { readDevMailbox } from "@omniflow/devmail";
+import { emulatedLogin, emulatedSign, SIGNED_FORM, type DemoUser } from "./seed.js";
 import type { RunningStack } from "./stack.js";
 
 /**
@@ -10,6 +11,8 @@ import type { RunningStack } from "./stack.js";
  * built through the same HTTP API the dashboard uses, with one payout already carried through:
  *   Alice — paid to her address; Carol — claim link emailed, not claimed; Dave — waiting for payment details;
  *   Frank — claim link not used, returned to the account when it expired.
+ * Documents as a US payer keeps them: Alice's W-9 is on file (so her 1099-NEC can be filled at once), a W-8BEN is
+ * asked of Carol and not yet sent; received forms go to the example's finance address.
  * The visitor is admin, operator and one of the approvers (2 of 3). The other two approvers are simulated people
  * (Anna, Boris): they sign the seeded payout, and afterwards sign anything only once the visitor has signed it —
  * so the visitor can carry a payout of their own all the way through.
@@ -174,7 +177,8 @@ export class LiveExamples {
     const p = await this.api<{ id: string }>(guest, "POST", `/orgs/${orgId}/payouts`, {
       title: "September contributors",
       rows: [
-        { name: "Alice", address: alice, amount: "1200", category: "grants" },
+        // paid to her address; the email is where a tax-form request reaches her
+        { name: "Alice", address: alice, email: mail("alice"), amount: "1200", category: "grants" },
         { name: "Frank", email: mail("frank"), amount: "500", category: "contractors" },
         // no details yet: stays out of every batch, and keeps the payout open once Frank's deposit comes back
         { name: "Dave", amount: "300", category: "grants" },
@@ -201,6 +205,17 @@ export class LiveExamples {
     await this.settled(guest, p.id, (rows) => rows.find((r) => r.name === "Carol")?.status === "in_escrow");
 
     step("batch 2 settled");
+    // documents: forms go to the finance address; Alice sends her W-9 through the request link; Carol is asked for a W-8BEN
+    await this.api(guest, "PATCH", `/orgs/${orgId}/settings`, { docDestination: mail("finance") });
+    const rows = (await this.api<{ rows: { row: string; name: string }[] }>(guest, "GET", `/payouts/${p.id}/receipt`)).rows;
+    const row = (name: string) => rows.find((r) => r.name === name)!.row;
+    await this.api(guest, "POST", `/payouts/${p.id}/rows/${row("Alice")}/document-request`, { type: "w9" });
+    const letter = (await readDevMailbox(this.stack.db, mail("alice"))).find((m) => /needs a tax form/.test(m.subject));
+    const token = letter?.body.match(/#\/tax-form\/(\S+)/)?.[1];
+    if (!token) throw new Error("no tax-form request reached Alice");
+    await this.api(guest, "POST", `/tax-forms/${token}`, { type: "w9", filename: "W-9 Alice.pdf", contentBase64: Buffer.from(SIGNED_FORM).toString("base64") });
+    await this.api(guest, "POST", `/payouts/${p.id}/rows/${row("Carol")}/document-request`, { type: "w8ben" });
+    step("documents");
     // the notifications of the build were for the simulated approvers; the visitor starts with a clean inbox
     await this.stack.db.query(`DELETE FROM dev_mailbox WHERE to_addr = ANY($1)`, [[mail("you"), mail("anna"), mail("boris")]]);
     this.o.log?.(`live example ${id} ready`);

@@ -630,6 +630,11 @@ describe.skipIf(!DB_URL)("the application through the browser", () => {
     await v.goto(`${demoUrl()}${orgHref}/reports`);
     await expect.poll(() => v.textContent("body")).toContain("Frank");
     await shot(v, "live-example-reports");
+    // documents come with it: Alice's W-9 is on file, so her 1099-NEC is one click away; Carol's W-8BEN is asked for
+    expect(await v.getByTestId("year-end").isDisabled()).toBe(false);
+    await v.getByTestId("year-end").click();
+    await v.getByTestId("tin-Alice").waitFor();
+    expect(await v.getByTestId("tin-Carol").count()).toBe(0);
 
     // a payout of their own: they sign, the simulated approver signs after them, the money goes
     await v.goto(`${demoUrl()}${orgHref}/new`);
