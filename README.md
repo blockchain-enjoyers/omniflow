@@ -2,7 +2,7 @@
 
 **A payout engine with the documents built in.** One list, one signature, and each payment produces its own record: who asked for it, who approved it, the amount, the date and the transaction hash. The tax forms a payment needs are part of the same flow.
 
-[Pitch video](https://www.youtube.com/watch?v=DLH3iBm0F7o) · [Developer guide](README.DEV.md) · [Tell us what you think](https://docs.google.com/forms/d/e/1FAIpQLSctmQsrwjFSDQLeN8fPYaNhO669yKvvqBY7lV7uiIYcECPQLA/viewform)
+[Try it live](https://demo-production-5ad5.up.railway.app) · [Pitch video](https://www.youtube.com/watch?v=DLH3iBm0F7o) · [Developer guide](README.DEV.md) · [Tell us what you think](https://docs.google.com/forms/d/e/1FAIpQLSctmQsrwjFSDQLeN8fPYaNhO669yKvvqBY7lV7uiIYcECPQLA/viewform)
 
 ## Who it is for
 
@@ -87,7 +87,7 @@ The cross chain routing with automatic conversion mentioned in the pitch lives i
 
 ## Team
 
-Two founders. First place on the LI.FI track at ETHGlobal HackMoney, February 2026.
+Two technical co-founders: smart contracts and account abstraction, cross chain bridges, and payments inside a fintech. We won the LI.FI track at ETHGlobal HackMoney in February 2026 and took part in Arbitrum Open House London.
 
 ## Tell us what you think
 
