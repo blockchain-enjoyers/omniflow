@@ -408,8 +408,8 @@ function YearEndForms({ org }: { org: Org }) {
   const [rec, setRec] = useState<Record<string, { tin: string; street: string; city: string; state: string; zip: string }>>({});
   const a = useAction();
   const y = ye.data;
-  const P = (k: keyof typeof payer, label: string, wide = false) => (
-    <Field label={label}><input className={wide ? "" : "w-amount"} data-testid={`payer-${k}`} value={payer[k]} onChange={(e) => setPayer({ ...payer, [k]: e.target.value })} /></Field>
+  const P = (k: keyof typeof payer, label: string, wide = false, o: { max?: number; placeholder?: string } = {}) => (
+    <Field label={label}><input className={wide ? "" : "w-amount"} data-testid={`payer-${k}`} maxLength={o.max} placeholder={o.placeholder} value={payer[k]} onChange={(e) => setPayer({ ...payer, [k]: o.max === 2 ? e.target.value.toUpperCase() : e.target.value })} /></Field>
   );
   return (
     <Section title="Year-end forms" desc={y ? `Form ${y.form.name}, Rev. ${y.form.revision} — ${y.form.copy}. Only the copy the IRS allows to print is produced.` : ""} testid="year-end-forms">
@@ -419,11 +419,11 @@ function YearEndForms({ org }: { org: Org }) {
       <h3 style={{ marginTop: 0 }}>Payer</h3>
       <div className="grid grid-3">
         {P("name", "Legal name", true)}
-        {P("tin", "TIN (EIN)")}
+        {P("tin", "TIN (EIN)", false, { placeholder: "12-3456789" })}
         {P("phone", "Telephone")}
         {P("street", "Street address", true)}
         {P("city", "City or town")}
-        <div className="row">{P("state", "State")}{P("zip", "ZIP")}</div>
+        <div className="row">{P("state", "State", false, { max: 2, placeholder: "IL" })}{P("zip", "ZIP")}</div>
       </div>
       <h3>Recipients with a W-9 on file</h3>
       <Table
@@ -440,7 +440,7 @@ function YearEndForms({ org }: { org: Org }) {
               <input className="w-amount" data-testid={`tin-${r.name}`} placeholder="123-45-6789" value={v.tin} onChange={(e) => set({ tin: e.target.value })} />,
               <span className="stack">
                 <input data-testid={`street-${r.name}`} placeholder="street" value={v.street} onChange={(e) => set({ street: e.target.value })} />
-                <span className="row"><input className="w-amount" placeholder="city" value={v.city} onChange={(e) => set({ city: e.target.value })} /><input className="w-amount" placeholder="state" value={v.state} onChange={(e) => set({ state: e.target.value })} /><input className="w-amount" placeholder="ZIP" value={v.zip} onChange={(e) => set({ zip: e.target.value })} /></span>
+                <span className="row"><input className="w-amount" placeholder="city" value={v.city} onChange={(e) => set({ city: e.target.value })} /><input className="w-amount" placeholder="state, e.g. TX" maxLength={2} value={v.state} onChange={(e) => set({ state: e.target.value.toUpperCase() })} /><input className="w-amount" placeholder="ZIP" value={v.zip} onChange={(e) => set({ zip: e.target.value })} /></span>
               </span>,
               <button className="secondary sm" data-testid={`nec-${r.name}`} disabled={a.busy} onClick={a.run(() => downloadBinary(auth.headers, `/orgs/${org.id}/reports/year-end/1099-nec`, `1099-nec-${r.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${y!.year}.pdf`, { year: y!.year, recipient: r.key, payer, recipientInfo: v }))}>Download 1099-NEC</button>,
             ],

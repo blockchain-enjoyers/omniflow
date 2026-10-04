@@ -541,6 +541,10 @@ describe.skipIf(!DB_URL)("sender side e2e (emulated Privy)", () => {
     expect(Number(carol.usd)).toBeGreaterThanOrEqual(250);
     const nec = (body: object) => api.post(`/orgs/${orgId}/reports/year-end/1099-nec`).set(ops.headers).send({ year, recipient: carol.key, payer: { name: "Acme Inc.", street: "1 Main St", city: "Springfield", state: "IL", zip: "62701", tin: "12-3456789" }, recipientInfo: { tin: "123-45-6789", street: "9 Elm St", city: "Austin", state: "TX", zip: "73301" }, ...body });
     await nec({ recipientInfo: { tin: "123" } }).expect(400);
+    // the boxes have fixed lengths: a state is its two-letter code, said in words rather than a server error
+    const tooLong = await nec({ payer: { name: "Acme Inc.", tin: "12-3456789", state: "Illinois" } }).expect(400);
+    expect(tooLong.body.error).toBe("Payer state: at most 2 characters — use the two-letter code, e.g. IL");
+    await nec({ recipientInfo: { tin: "123-45-6789", state: "Texas" } }).expect(400);
     await nec({ recipient: "0xnot-on-file" }).expect(404);
     await nec({ year: 2025 }).expect(400);
     await api.post(`/orgs/${orgId}/reports/year-end/1099-nec`).set(a2.headers).send({ year, recipient: carol.key }).expect(403);

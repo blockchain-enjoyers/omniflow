@@ -5,7 +5,7 @@ import type { Mailer } from "../mail/mailer.js";
 import { HttpError } from "../payouts/service.js";
 import type { PriceSource } from "../reports/service.js";
 import { documentLabel, irsFile, isRecipientForm, NEC, RECIPIENT_FORMS, type RecipientForm } from "./irs.js";
-import { fill1099Nec, normalizeTin, type Party } from "./nec.js";
+import { fill1099Nec, NecFieldError, normalizeTin, type Party } from "./nec.js";
 
 const sha256 = (b: Uint8Array | string) => createHash("sha256").update(b).digest("hex");
 const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
@@ -194,6 +194,8 @@ export class DocumentService {
       payer: { ...input.payer, name: input.payer.name.trim(), tin: payerTin },
       recipient: { ...input.recipientInfo, name: r.name, tin: recipientTin },
       nonemployeeCompensation: r.usd,
+    }).catch((e) => {
+      throw e instanceof NecFieldError ? new HttpError(400, e.message) : e;
     });
     await this.audit(orgId, actor, "document.1099nec", { year, recipient: r.name, box1: r.usd });
     const slug = r.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "recipient";
