@@ -10,7 +10,8 @@ import { startStack } from "./stack.js";
  *   HISTORY=0              the demo organisation without its three months of payouts
  *   AA=self                the API bundles itself (default: ZeroDev emulator in front of the Alto bundler)
  *   EXAMPLES=0             no "Open a live example" (each example moves the demo chain's clock a day forward)
- *   EXAMPLE_POOL           live examples kept ready in advance (default 2)
+ *   EXAMPLE_POOL           live examples kept ready in advance (default 0: built on the click, ~3 s — each one
+ *                          moves the demo chain clock a day forward, so none are built until a visitor asks)
  */
 const databaseUrl = process.env.DEVSTACK_DATABASE_URL ?? process.env.DATABASE_URL;
 if (!databaseUrl) {
@@ -26,7 +27,7 @@ const stack = await startStack({
   forkUrl: process.env.FORK_URL,
   aa: process.env.AA === "self" ? "self" : "zerodev",
   log,
-  liveExamples: process.env.EXAMPLES === "0" ? undefined : { pool: Number(process.env.EXAMPLE_POOL ?? 2), deferStart: true },
+  liveExamples: process.env.EXAMPLES === "0" ? undefined : { pool: Number(process.env.EXAMPLE_POOL ?? 0), deferStart: true },
   // the demo history happens on past dates: the local chain starts that many days ago and catches up to today
   chainStart: seeding && history ? Math.floor(Date.now() / 1000) - HISTORY_DAYS * 86_400 : undefined,
   demoAccounts: seeding ? demoAccounts(history) : undefined,

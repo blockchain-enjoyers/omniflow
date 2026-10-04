@@ -86,7 +86,7 @@ Stop everything with `Ctrl+C`.
 | `SEED=0` | start without the demo organisation |
 | `HISTORY=0` | the demo organisation without its three months of history |
 | `EXAMPLES=0` | turn the live example off |
-| `EXAMPLE_POOL` | how many live examples to keep ready in advance (default 2) |
+| `EXAMPLE_POOL` | how many live examples to keep ready in advance (default 0: each is built on the click, in about 3 seconds). Every example moves the demo chain clock a day forward, so a pool built at start would put payment dates ahead of today |
 | `FOUNDRY_BIN` | directory with `anvil` and `forge` |
 | `ALTO_LOG_LEVEL`, `ALTO_LOG_FILE` | bundler logging |
 | `DEV_MAILBOX_FILES` | where the demo mailbox keeps email attachments (default: the OS temp directory); the database keeps only their name, size and SHA-256 |
