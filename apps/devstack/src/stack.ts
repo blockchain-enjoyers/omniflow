@@ -55,6 +55,8 @@ export interface StackOptions {
   gatewayPort?: number;
   /** behind the hosting's own proxy: how many proxies sit in front of the gateway (so per-visitor limits see the visitor) */
   trustProxy?: number;
+  /** another stack has claimed the database (prepareDatabase): this one's scheduler has stopped */
+  onEvicted?: () => void;
 }
 
 export interface RunningStack {
@@ -77,8 +79,14 @@ const portOf = (s: Server) => (s.address() as AddressInfo).port;
 /**
  * The dev database is recreated on every start (the chain is fresh too, so old rows would point at nothing). To keep
  * a real database safe, only a database whose name ends in `_dev` or `_test` is ever dropped.
+ *
+ * Two stacks on one database break each other: a host that starts the new one before it stops the old (a deploy)
+ * lets the old scheduler write its own chain's state — the indexer cursor, refunds — into the new rows, and the new
+ * stack's claims are never indexed. So the database has an owner, kept outside the schema that is dropped: the stack
+ * that claims it last. A live owner (it checks in on every tick) gets `handoverMs` to notice and stop before the
+ * schema goes.
  */
-export async function prepareDatabase(url: string): Promise<pg.Pool> {
+export async function prepareDatabase(url: string, owner = randomBytes(8).toString("hex"), handoverMs = 0): Promise<pg.Pool> {
   const u = new URL(url);
   const name = decodeURIComponent(u.pathname.replace(/^\//, ""));
   if (!/_(dev|test)$/.test(name)) throw new Error(`refusing to reset database "${name}": the dev stack only resets databases named *_dev or *_test`);
@@ -93,8 +101,20 @@ export async function prepareDatabase(url: string): Promise<pg.Pool> {
     await a.end();
   }
   const db = new pg.Pool({ connectionString: url });
+  await db.query(
+    `CREATE SCHEMA IF NOT EXISTS devstack;
+     CREATE TABLE IF NOT EXISTS devstack.owner (one boolean PRIMARY KEY DEFAULT true CHECK (one), id text NOT NULL, seen timestamptz NOT NULL DEFAULT now())`,
+  );
+  const prev = await db.query(`SELECT id FROM devstack.owner WHERE seen > now() - interval '30 seconds'`);
+  await db.query(`INSERT INTO devstack.owner (id) VALUES ($1) ON CONFLICT (one) DO UPDATE SET id=EXCLUDED.id, seen=now()`, [owner]);
+  if (prev.rowCount && handoverMs) await new Promise((ok) => setTimeout(ok, handoverMs));
   await db.query("DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;");
   return db;
+}
+
+/** The owner checks in; false once another stack has claimed the database. */
+async function stillOwner(db: pg.Pool, owner: string) {
+  return Boolean((await db.query(`UPDATE devstack.owner SET seen=now() WHERE id=$1`, [owner])).rowCount);
 }
 
 function buildFrontend(app: "web" | "claim", env: Record<string, string>, base = "/") {
@@ -116,7 +136,9 @@ export async function startStack(o: StackOptions): Promise<RunningStack> {
 
   log(o.fork ? "anvil: Arbitrum Sepolia fork, deploying escrow and paymaster…" : "anvil: local chain, deploying the stack from source…");
   const chain = await startDevStack({ fork: o.fork, forkUrl: o.forkUrl, port: p.anvil || undefined, contractsDir: CONTRACTS, startTime: o.fork ? undefined : o.chainStart });
-  const db = await prepareDatabase(o.databaseUrl);
+  const owner = randomBytes(8).toString("hex");
+  const tickMs = o.tickMs ?? 3000;
+  const db = await prepareDatabase(o.databaseUrl, owner, 2 * tickMs + 4000);
 
   try {
     // Privy EMULATOR (never Privy): email + code, ES256 tokens, a server-held embedded wallet.
@@ -227,13 +249,20 @@ export async function startStack(o: StackOptions): Promise<RunningStack> {
       if (running) return;
       running = true;
       try {
+        if (!(await stillOwner(db, owner))) {
+          clearInterval(timer);
+          examples?.stop();
+          log("another stack has claimed the database: this one stops writing to it");
+          o.onEvicted?.();
+          return;
+        }
         await api.tick();
       } catch (e) {
         log(`tick: ${(e as Error).message}`);
       } finally {
         running = false;
       }
-    }, o.tickMs ?? 3000);
+    }, tickMs);
 
     const result: RunningStack = {
       chain,

@@ -37,6 +37,8 @@ const stack = await startStack({
   publicUrl: process.env.PUBLIC_URL || undefined,
   gatewayPort: process.env.PORT ? Number(process.env.PORT) : undefined,
   trustProxy: process.env.PUBLIC_URL ? Number(process.env.TRUST_PROXY ?? 1) : undefined,
+  // a newer stack (a deploy, a second terminal) took the database: this one's rows are gone, so it leaves
+  onEvicted: () => process.exit(0),
 });
 
 let demo: Awaited<ReturnType<typeof seedDemo>> | null = null;
