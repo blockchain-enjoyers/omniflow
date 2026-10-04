@@ -49,7 +49,9 @@ Address book, repeat a payout with edits, schedules, members, settings, activity
 
 ## Where it stands
 
-This is a pre-production build, put together from working parts to be shown rather than sold. Nothing of ours is on a public network yet, Privy, ZeroDev, email and the on-ramp run against emulators, and receiver-side rules are out of this scope. Two users at once is not tested, and a second signed batch with the same transfers would pay twice, prevented today only by the backend.
+`ClaimEscrow` is deployed and verified on **Arbitrum Sepolia** at [`0x47f8ac59EedbaF628414246879F0B8f128165308`](https://arbitrum-sepolia.blockscout.com/address/0x47f8ac59EedbaF628414246879F0B8f128165308?tab=contract), through the deterministic CREATE2 deployer, so the address is the same on any chain for the same token list.
+
+Beyond that, this is a pre-production build, put together from working parts to be shown rather than sold. Privy, ZeroDev, email and the on-ramp run against emulators, and receiver-side rules are out of this scope. Two users at once is not tested, and a second signed batch with the same transfers would pay twice, prevented today only by the backend.
 
 We are not satisfied with it, and we are already rebuilding. The next version is **document first, not crypto first**: a new frontend with an interface a finance person can read, and the paperwork, rather than the wallet, as the thing the product is organised around.
 
